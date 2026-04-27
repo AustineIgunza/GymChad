@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Goal {
+  CUTTING
+  BULKING
+  MAINTENANCE
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+enum MuscleGroup {
+  CHEST
+  BACK
+  SHOULDERS
+  BICEPS
+  TRICEPS
+  LEGS
+  GLUTES
+  CORE
+  CARDIO
+  FULL_BODY
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+  PRE_WORKOUT
+  POST_WORKOUT
+}
+
+model User {
+  id             String         @id @default(cuid())
+  email          String         @unique
+  name           String?
+  supabaseId     String         @unique
+  plan           Plan           @default(FREE)
+  goal           Goal           @default(CUTTING)
+  currentSplitId String?
+  tdee           Int?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  splits         Split[]
+  workouts       Workout[]
+  nutritionLogs  NutritionLog[]
+  customFoods    CustomFood[]
+  aiSessions     AISession[]
+  events         Event[]
+}
+
+model Split {
+  id        String     @id @default(cuid())
+  userId    String
+  name      String
+  isActive  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id])
+  days      SplitDay[]
+}
+
+model SplitDay {
+  id        String             @id @default(cuid())
+  splitId   String
+  dayNumber Int
+  label     String
+  split     Split              @relation(fields: [splitId], references: [id])
+  exercises SplitDayExercise[]
+}
+
+model SplitDayExercise {
+  id         String    @id @default(cuid())
+  splitDayId String
+  exerciseId String
+  orderIndex Int
+  splitDay   SplitDay  @relation(fields: [splitDayId], references: [id])
+  exercise   Exercise  @relation(fields: [exerciseId], references: [id])
+}
+
+model Exercise {
+  id                String             @id @default(cuid())
+  name              String
+  muscleGroup       MuscleGroup
+  equipment         String?
+  isCustom          Boolean            @default(false)
+  userId            String?
+  splitDayExercises SplitDayExercise[]
+  workoutSets       WorkoutSet[]
+}
+
+model Workout {
+  id          String      @id @default(cuid())
+  userId      String
+  splitDayId  String?
+  label       String
+  date        DateTime    @default(now())
+  notes       String?
+  durationMin Int?
+  deletedAt   DateTime?
+  user        User        @relation(fields: [userId], references: [id])
+  sets        WorkoutSet[]
+}
+
+model WorkoutSet {
+  id         String   @id @default(cuid())
+  workoutId  String
+  exerciseId String
+  setNumber  Int
+  reps       Int
+  weightKg   Float
+  rpe        Int?
+  isWarmup   Boolean  @default(false)
+  workout    Workout  @relation(fields: [workoutId], references: [id])
+  exercise   Exercise @relation(fields: [exerciseId], references: [id])
+}
+
+model NutritionLog {
+  id              String   @id @default(cuid())
+  userId          String
+  date            DateTime @default(now())
+  mealType        MealType
+  foodName        String
+  calories        Int
+  proteinG        Float
+  carbsG          Float
+  fatG            Float
+  quantityG       Float    @default(100)
+  openFoodFactsId String?
+  user            User     @relation(fields: [userId], references: [id])
+}
+
+model CustomFood {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  calories  Int
+  proteinG  Float
+  carbsG    Float
+  fatG      Float
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model AISession {
+  id        String   @id @default(cuid())
+  userId    String
+  createdAt DateTime @default(now())
+  messages  Json
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Event {
+  id        String   @id @default(cuid())
+  userId    String
+  event     String
+  metadata  Json?
+  timestamp DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
