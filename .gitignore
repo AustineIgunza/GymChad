@@ -1,50 +1,43 @@
 # Dependencies
 node_modules/
-venv/
-.venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+.pnp
+.pnp.js
 
-# Environment files — set these in Railway / Vercel dashboards
+# Testing
+coverage/
+
+# Production
+build/
+dist/
+
+# Misc
+.DS_Store
 .env
 .env.local
 .env.*.local
-backend/.env
-
-# Build outputs
-dist/
-build/
-*.egg-info/
-.eggs/
-
-# Database files — SQLite is dev-only; production uses Supabase
-*.db
-*.sqlite
-*.sqlite3
 
 # Logs
-*.log
 logs/
-
-# OS
-.DS_Store
-Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
 # IDE
 .vscode/
 .idea/
 *.swp
+*.swo
+*~
 
-# Vite / PWA cache
-.vite/
-dev-dist/
+# OS
+.DS_Store
+Thumbs.db
 
-# Python cache
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-htmlcov/
-.coverage
+# Build output
+*.tsbuildinfo
+.turbo/
+
+# Prisma
+prisma/migrations/
