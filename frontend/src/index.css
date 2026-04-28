@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-bg-primary text-text-primary;
+    overflow-x: hidden;
+  }
+
+  ::-webkit-scrollbar       { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { @apply bg-bg-secondary; }
+  ::-webkit-scrollbar-thumb { @apply bg-border-strong rounded-full; }
+
+  ::selection { background: rgba(220,38,38,0.3); color: #fca5a5; }
+
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type='number'] { -moz-appearance: textfield; }
+}
+
+@layer components {
+  .glass {
+    @apply bg-bg-card/80 backdrop-blur-xl border border-border;
+  }
+
+  .glass-hover {
+    @apply glass transition-all duration-200 hover:border-primary-700/40 hover:shadow-card-hover;
+  }
+
+  /* Superman red-to-blue gradient text */
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-500 to-blue-400 bg-clip-text text-transparent;
+  }
+
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pt-safe { padding-top:    env(safe-area-inset-top,    0px); }
+
+  .skeleton {
+    background: linear-gradient(90deg, #0f0f1c 25%, #1a1a30 50%, #0f0f1c 75%);
+    background-size: 200% 100%;
+    @apply animate-shimmer rounded-lg;
+  }
+
+  .page { @apply min-h-screen bg-bg-primary pb-24; }
+
+  .stepper-btn {
+    @apply w-11 h-11 flex items-center justify-center rounded-xl bg-bg-tertiary border border-border
+           text-text-primary active:scale-95 transition-all duration-100 select-none cursor-pointer;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+}
+
+/* ── Superman animated background ─────────────────────────────────── */
+.bg-animated {
+  background:
+    radial-gradient(ellipse at 15% 50%, rgba(220,38,38,0.10) 0%, transparent 55%),
+    radial-gradient(ellipse at 85% 20%, rgba(29,78,216,0.10) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 90%, rgba(220,38,38,0.05) 0%, transparent 45%),
+    #07070f;
+}
+
+/* ── Bottom nav blur ───────────────────────────────────────────────── */
+.bottom-nav {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* ── Page entry animation ──────────────────────────────────────────── */
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+.page-enter { animation: pageEnter 0.3s ease-out; }
+
+/* ── Superman S-shield accent line ────────────────────────────────── */
+.shield-border {
+  border-image: linear-gradient(90deg, #dc2626, #1d4ed8) 1;
+}
+
+/* ── Scrollbar hide utility ─────────────────────────────────────────── */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Chart animations ───────────────────────────────────────────────── */
+.recharts-bar-rectangle, .recharts-line-curve {
+  transition: opacity 0.2s;
+}
+.recharts-bar-rectangle:hover {
+  opacity: 0.85;
+}
