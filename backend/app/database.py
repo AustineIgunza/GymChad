@@ -48,6 +48,7 @@ else:
             "prepared_statement_cache_size": 0,  # Required for pgbouncer/Supabase pooler
             "server_settings": {"jit": "off"},   # Prevents timeout on first query
             "timeout": 30,
+            "ssl": "require",                    # Supabase requires SSL
         },
     )
 
