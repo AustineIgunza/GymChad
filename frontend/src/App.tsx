@@ -13,7 +13,6 @@ import { Dashboard } from './pages/Dashboard'
 import { WorkoutPage } from './pages/Workout'
 import { NutritionPage } from './pages/Nutrition'
 import { AnalyticsPage } from './pages/Analytics'
-import { CoachPage } from './pages/Coach'
 import { SettingsPage } from './pages/Settings'
 import { SplitsPage } from './pages/Splits'
 import { HistoryPage } from './pages/History'
@@ -99,14 +98,6 @@ function AppRoutes() {
           <ProtectedRoute>
             <div className="pb-20">
               <PageTransition><AnalyticsPage /></PageTransition>
-              <BottomNav />
-            </div>
-          </ProtectedRoute>
-        } />
-        <Route path="/coach" element={
-          <ProtectedRoute>
-            <div className="pb-20">
-              <PageTransition><CoachPage /></PageTransition>
               <BottomNav />
             </div>
           </ProtectedRoute>
