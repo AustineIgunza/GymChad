@@ -1,14 +1,16 @@
-import axios from "axios";
-import { useAuthStore } from "../stores/useAuthStore";
+import axios from 'axios'
+import { supabase } from './supabase'
 
-export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/v1",
-});
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api/v1',
+})
 
-api.interceptors.request.use((config) => {
-  const { userId } = useAuthStore.getState();
-  config.headers["x-user-id"] = userId;
-  return config;
-});
+api.interceptors.request.use(async (config) => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session?.access_token) {
+    config.headers['Authorization'] = `Bearer ${session.access_token}`
+  }
+  return config
+})
 
-export default api;
+export default api

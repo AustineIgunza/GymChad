@@ -7,7 +7,7 @@ export type MealType = 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK' | 'PRE_WORKOUT
 export type CardioType =
   | 'recumbent_bike' | 'upright_bike' | 'spinning' | 'treadmill' | 'walking'
   | 'elliptical' | 'rowing' | 'stairmaster' | 'jump_rope' | 'swimming'
-  | 'hiking' | 'running_outdoor' | 'cycling_outdoor' | 'battle_ropes' | 'hiit' | 'other'
+  | 'hiking' | 'battle_ropes' | 'hiit' | 'other'
 
 // ── Core models (snake_case — matches FastAPI JSON responses) ─────────────────
 export interface User {
@@ -99,32 +99,34 @@ export interface NutritionLog {
   date: string
   meal_type: MealType
   food_name: string
+  food_id?: string | null
+  quantity_g: number
   calories: number
   protein_g: number
   carbs_g: number
   fat_g: number
-  quantity_g: number
-  open_food_facts_id?: string | null
+  created_at: string
 }
 
+// Backend DailySummary returns field named 'logs'
 export interface DailySummary {
   date: string
   total_calories: number
   total_protein_g: number
   total_carbs_g: number
   total_fat_g: number
-  entries: NutritionLog[]
-  logs: NutritionLog[]  // alias used by some components
+  logs: NutritionLog[]
 }
 
+// CustomFood — per-100g values matching backend schema
 export interface CustomFood {
   id: string
   user_id: string
   name: string
-  calories: number
-  protein_g: number
-  carbs_g: number
-  fat_g: number
+  calories_per_100g: number
+  protein_per_100g: number
+  carbs_per_100g: number
+  fat_per_100g: number
   created_at: string
 }
 
@@ -159,11 +161,12 @@ export interface CardioSession {
   date: string
   cardio_type: CardioType
   duration_min: number
+  calories_burned: number | null
   level: number | null
   speed_kmh: number | null
   incline_pct: number | null
   rpm: number | null
-  calories_burned: number
+  distance_km: number | null
   notes: string | null
   created_at: string
 }
