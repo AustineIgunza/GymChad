@@ -1,0 +1,28 @@
+NETLIFY DEPLOYMENT STEPS
+
+1. Go to https://netlify.com and sign in with GitHub
+
+2. Click "New site from Git"
+
+3. Select GitHub, then select repository "AustineIgunza/GymChad"
+
+4. Configure build settings:
+   - Base directory: frontend
+   - Build command: npm run build
+   - Publish directory: frontend/dist
+
+5. Set Environment Variables in Netlify dashboard:
+   - VITE_SUPABASE_URL: https://[your-project].supabase.co
+   - VITE_SUPABASE_ANON_KEY: [your-anon-key]
+   - VITE_API_URL: [your-backend-api-url]
+
+6. Click Deploy
+
+7. Once deployed, get your Netlify URL and update Supabase CORS settings
+
+BACKEND DEPLOYMENT (Optional - for full features)
+- Deploy to Railway.app, Render, or Heroku
+- Update VITE_API_URL in Netlify environment variables
+- Set backend environment variables in the hosting platform
+
+For mobile optimization, the app is PWA-ready with responsive Tailwind CSS design.
