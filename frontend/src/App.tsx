@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAuthStore } from './stores/authStore'
@@ -34,7 +34,15 @@ function PageTransition({ children }: { children: React.ReactNode }) {
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, initialized } = useAuthStore()
-  if (!initialized) {
+  const [timedOut, setTimedOut] = useState(false)
+  useEffect(() => {
+    if (!initialized) {
+      const t = setTimeout(() => setTimedOut(true), 6000)
+      return () => clearTimeout(t)
+    }
+  }, [initialized])
+
+  if (!initialized && !timedOut) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-bg-primary">
         <motion.div

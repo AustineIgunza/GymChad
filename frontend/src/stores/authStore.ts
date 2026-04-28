@@ -40,7 +40,11 @@ export const useAuthStore = create<AuthState>()(
         set({ loading: true })
         try {
           // getSession handles the ?code= / #access_token= hash from Supabase redirect
-          const { data: { session } } = await supabase.auth.getSession()
+          const sessionPromise = supabase.auth.getSession()
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('auth timeout')), 5000)
+          )
+          const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise])
           if (session?.user) {
             const user = await verifyWithBackend(session.user)
             set({ user })
