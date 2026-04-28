@@ -7,12 +7,12 @@ Routers are then included in the main app.
 
 from fastapi import APIRouter
 
-from .auth_routes import router as auth_router
-from .workout_routes import router as workout_router
-from .nutrition_routes import router as nutrition_router
-from .progress_routes import router as progress_router
-from .coach_routes import router as coach_router
-from .split_routes import router as split_router
+from .routes.auth_routes import router as auth_router
+from .routes.workout_routes import router as workout_router
+from .routes.nutrition_routes import router as nutrition_router
+from .routes.progress_routes import router as progress_router
+from .routes.coach_routes import router as coach_router
+from .routes.split_routes import router as split_router
 
 # Create the v1 API prefix
 api_router = APIRouter(prefix="/api/v1")
