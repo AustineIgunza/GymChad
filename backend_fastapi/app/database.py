@@ -12,18 +12,20 @@ from typing import Generator
 import os
 
 # Get database URL from environment
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://user:password@localhost:5432/gymchad"
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Create the database engine
-# NullPool means no connection pooling (good for serverless)
-engine = create_engine(
-    DATABASE_URL,
-    poolclass=NullPool if os.getenv("ENVIRONMENT") == "production" else None,
-    echo=os.getenv("SQL_ECHO", "false").lower() == "true"
-)
+# Create the database engine only if DATABASE_URL is set
+engine = None
+if DATABASE_URL:
+    try:
+        engine = create_engine(
+            DATABASE_URL,
+            poolclass=NullPool if os.getenv("ENVIRONMENT") == "production" else None,
+            echo=os.getenv("SQL_ECHO", "false").lower() == "true"
+        )
+    except Exception as e:
+        print(f"Warning: Could not initialize database engine: {e}")
+        engine = None
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -10,8 +10,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
-from app.api import api_router
-from app.core import UserContextMiddleware
+try:
+    from app.api import api_router
+    api_available = True
+except Exception as e:
+    logger = logging.getLogger(__name__)
+    logger.warning(f"Could not load API routes: {e}")
+    api_available = False
+
+try:
+    from app.core import UserContextMiddleware
+except Exception as e:
+    logger = logging.getLogger(__name__)
+    logger.warning(f"Could not load UserContextMiddleware: {e}")
+    UserContextMiddleware = None
 
 # Configure logging
 logging.basicConfig(
