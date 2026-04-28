@@ -14,9 +14,22 @@ interface AuthState {
   refreshUser: () => Promise<void>
 }
 
+async function verifyWithBackend(supabaseUser: { id: string; email?: string; user_metadata?: any }): Promise<User | null> {
+  try {
+    const { data } = await api.post('/auth/verify', {
+      supabase_id: supabaseUser.id,
+      email: supabaseUser.email,
+      name: supabaseUser.user_metadata?.full_name,
+    })
+    return data
+  } catch {
+    return null
+  }
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, _get) => ({
+    (set) => ({
       user: null,
       loading: false,
       initialized: false,
@@ -26,21 +39,29 @@ export const useAuthStore = create<AuthState>()(
       initialize: async () => {
         set({ loading: true })
         try {
+          // getSession handles the ?code= / #access_token= hash from Supabase redirect
           const { data: { session } } = await supabase.auth.getSession()
           if (session?.user) {
-            // Verify/upsert user in our DB
-            const { data } = await api.post('/auth/verify', {
-              supabase_id: session.user.id,
-              email: session.user.email,
-              name: session.user.user_metadata?.full_name,
-            })
-            set({ user: data })
+            const user = await verifyWithBackend(session.user)
+            set({ user })
+          } else {
+            set({ user: null })
           }
         } catch {
           set({ user: null })
         } finally {
           set({ loading: false, initialized: true })
         }
+
+        // Listen for future sign-in / sign-out events (e.g. after OAuth redirect)
+        supabase.auth.onAuthStateChange(async (event, session) => {
+          if (event === 'SIGNED_IN' && session?.user) {
+            const user = await verifyWithBackend(session.user)
+            set({ user, initialized: true })
+          } else if (event === 'SIGNED_OUT') {
+            set({ user: null, initialized: true })
+          }
+        })
       },
 
       refreshUser: async () => {

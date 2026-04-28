@@ -75,7 +75,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_url, "http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        frontend_url,
+        "https://gym-chad.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
