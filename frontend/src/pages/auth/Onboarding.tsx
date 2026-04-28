@@ -25,7 +25,7 @@ export function Onboarding() {
     activity_level: 'moderate' as ActivityLevel,
   })
   const [loading, setLoading] = useState(false)
-  const { refreshUser, initialize } = useAuthStore()
+  const { initialize } = useAuthStore()
   const navigate = useNavigate()
   const toast = useToast()
 

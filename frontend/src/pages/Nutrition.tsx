@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, X, PencilLine } from 'lucide-react'
 import { nutritionApi } from '../services/nutrition'
 import { useAuthStore } from '../stores/authStore'
@@ -104,7 +104,7 @@ export function NutritionPage() {
     try {
       const g = parseFloat(quantity)
       const macros = calcMacros(selectedFood, g)
-      await nutritionApi.create({ date, meal_type: mealType, food_name: selectedFood.name, food_id: null, quantity_g: g, ...macros })
+      await nutritionApi.create({ date, meal_type: mealType, food_name: selectedFood.name, quantity_g: g, ...macros })
       await fetchNutrition(date)
       closeModal()
       toast.success('Food logged!')
@@ -127,7 +127,6 @@ export function NutritionPage() {
         date,
         meal_type: mealType,
         food_name: manualFood.name,
-        food_id: null,
         quantity_g: qty,
         calories: parseFloat(manualFood.calories) || 0,
         protein_g: parseFloat(manualFood.protein_g) || 0,
@@ -164,7 +163,7 @@ export function NutritionPage() {
   }
 
   const groupedLogs = MEAL_TYPES.reduce((acc, m) => {
-    acc[m] = summary?.logs.filter(l => l.meal_type === m) || []
+    acc[m] = summary?.entries.filter(l => l.meal_type === m) || []
     return acc
   }, {} as Record<MealType, NutritionLog[]>)
 
@@ -276,7 +275,7 @@ export function NutritionPage() {
           )
         })}
 
-        {!loading && !summary?.logs.length && (
+        {!loading && !summary?.entries.length && (
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}

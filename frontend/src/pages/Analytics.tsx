@@ -59,7 +59,7 @@ export function AnalyticsPage() {
   const [logModal, setLogModal] = useState(false)
   const [measureForm, setMeasureForm] = useState(defaultMeasurement)
   const [savingMeasure, setSavingMeasure] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [_loading, setLoading] = useState(true)
 
   useEffect(() => {
     exercisesApi.list().then(exs => {

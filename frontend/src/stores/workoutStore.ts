@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Workout, WorkoutSet } from '../types'
+import type { Workout } from '../types'
 
 interface ActiveSet {
   exercise_id: string

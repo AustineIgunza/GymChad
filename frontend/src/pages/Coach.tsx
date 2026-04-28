@@ -13,7 +13,7 @@ const QUICK_PROMPTS = [
 ]
 
 export function CoachPage() {
-  const { user } = useAuthStore()
+  const { user: _user } = useAuthStore()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)

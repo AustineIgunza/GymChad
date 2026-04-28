@@ -100,9 +100,6 @@ export function SettingsPage() {
             <div className="flex-1 min-w-0">
               <h2 className="text-lg font-bold text-text-primary">{user?.name || 'Athlete'}</h2>
               <p className="text-sm text-text-muted truncate">{user?.email}</p>
-              <span className={`inline-flex mt-1 items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${user?.plan === 'PRO' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-bg-tertiary text-text-muted'}`}>
-                {user?.plan === 'PRO' ? '⭐ PRO' : '🆓 Free'}
-              </span>
             </div>
           </div>
         </Card>

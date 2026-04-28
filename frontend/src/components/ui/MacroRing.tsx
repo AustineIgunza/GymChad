@@ -27,8 +27,8 @@ export function MacroRing({ calories, target, protein, carbs, fat, size = 140 }:
   const proteinPct = (protein * 4) / totalMacroKcal
   const carbsPct = (carbs * 4) / totalMacroKcal
 
-  const proteinLen = proteinPct * circumference
-  const carbsLen = carbsPct * circumference
+  void (proteinPct * circumference)
+  void (carbsPct * circumference)
 
   const remaining = Math.max(0, target - calories)
   const isOver = calories >= target && target > 0
