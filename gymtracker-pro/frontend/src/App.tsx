@@ -1,0 +1,1204 @@
+import { useEffect, useState } from "react";
+import { NavLink, Route, Routes } from "react-router-dom";
+import toast, { Toaster } from "react-hot-toast";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell } from "recharts";
+import api from "./services/api";
+import { useAuthStore } from "./stores/useAuthStore";
+import { Card, Button, Input, Badge } from "./components/ui/index";
+import { getMealTypeEmoji } from "./utils/nutrition";
+import type { Exercise, NutritionLog } from "./types";
+
+// ─── DASHBOARD ────────────────────────────────────────────────────────
+function DashboardPage() {
+  const [todayWorkout, setTodayWorkout] = useState<any>(null);
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    Promise.all([
+      api.get("/workouts/today").then((res) => setTodayWorkout(res.data)).catch(() => null),
+      api.get("/auth/profile").then((res) => setUser(res.data.user)).catch(() => null),
+    ]).catch(() => null);
+  }, []);
+
+  return (
+    <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
+      <Card className="bg-gradient-to-br from-blue-900/50 to-blue-800/30 border-blue-700">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl lg:text-4xl font-bold">GymChad</h1>
+            <p className="text-sm text-gray-400">{user?.name || "Athlete"}</p>
+          </div>
+          <Badge color="blue">{user?.goal || "CUTTING"}</Badge>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card title="Today's Workout" className="lg:col-span-2">
+          {todayWorkout ? (
+            <div className="space-y-2">
+              <p className="font-semibold">{todayWorkout.label}</p>
+              <p className="text-sm text-gray-400">{todayWorkout.sets?.length || 0} sets logged</p>
+              <NavLink to="/workout/new" className="inline-block mt-2">
+                <Button size="sm" variant="primary">
+                  Continue
+                </Button>
+              </NavLink>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-gray-400 text-sm">No workout logged yet today</p>
+              <NavLink to="/workout/new">
+                <Button size="sm" variant="primary" className="w-full">
+                  Start Workout
+                </Button>
+              </NavLink>
+            </div>
+          )}
+        </Card>
+
+        <Card title="Quick Stats">
+          <div className="space-y-4">
+            <div className="text-center">
+              <p className="text-3xl font-bold text-blue-400">{user?.tdee || "-"}</p>
+              <p className="text-xs text-gray-400">TDEE</p>
+            </div>
+            <div className="text-center">
+              <p className="text-3xl font-bold text-green-400">0</p>
+              <p className="text-xs text-gray-400">This Week</p>
+            </div>
+            <div className="text-center">
+              <p className="text-3xl font-bold text-purple-400">0</p>
+              <p className="text-xs text-gray-400">Workouts</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <NavLink to="/nutrition" className="block">
+          <Card className="hover:bg-gray-750 cursor-pointer transition-colors h-full">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold">Log Meal</p>
+                <p className="text-xs text-gray-400">Track your nutrition</p>
+              </div>
+              <span className="text-3xl lg:text-4xl">🍽️</span>
+            </div>
+          </Card>
+        </NavLink>
+
+        <NavLink to="/coach" className="block">
+          <Card className="hover:bg-gray-750 cursor-pointer transition-colors h-full">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold">AI Coach</p>
+                <p className="text-xs text-gray-400">Get personalized advice</p>
+              </div>
+              <span className="text-3xl lg:text-4xl">🤖</span>
+            </div>
+          </Card>
+        </NavLink>
+      </div>
+    </main>
+  );
+}
+
+// ─── WORKOUT LOGGER ────────────────────────────────────────────────────
+function WorkoutPage() {
+  const [workoutId, setWorkoutId] = useState<string | null>(null);
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [selectedExerciseId, setSelectedExerciseId] = useState("");
+  const [weightKg, setWeightKg] = useState(80);
+  const [reps, setReps] = useState(8);
+  const [rpe, setRpe] = useState(7);
+  const [isWarmup, setIsWarmup] = useState(false);
+  const [sets, setSets] = useState<any[]>([]);
+  const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [label, setLabel] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    api.get("/exercises").then((res) => setExercises(res.data)).catch(() => null);
+    api.get("/workouts/recommendations").then((res) => setRecommendations(res.data)).catch(() => null);
+  }, []);
+
+  const selectedExercise = exercises.find((e) => e.id === selectedExerciseId);
+  const selectedRecommendation = recommendations.find((r) => r.exerciseId === selectedExerciseId);
+
+  async function startWorkout() {
+    try {
+      setLoading(true);
+      const res = await api.post("/workouts", { label: label || "Gym Session" });
+      setWorkoutId(res.data.id);
+      setSets([]);
+      toast.success("Workout started!");
+    } catch (err) {
+      toast.error("Failed to start workout");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function addSet() {
+    if (!workoutId || !selectedExerciseId) {
+      toast.error("Select an exercise and start a workout");
+      return;
+    }
+    try {
+      setLoading(true);
+      const res = await api.post(`/workouts/${workoutId}/sets`, {
+        exerciseId: selectedExerciseId,
+        setNumber: sets.length + 1,
+        reps,
+        weightKg,
+        rpe: rpe || undefined,
+        isWarmup,
+      });
+      setSets([...sets, res.data]);
+      toast.success("Set added!");
+    } catch (err) {
+      toast.error("Failed to add set");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deleteSet(setId: string) {
+    if (!workoutId) return;
+    try {
+      await api.delete(`/workouts/${workoutId}/sets/${setId}`);
+      setSets(sets.filter((s) => s.id !== setId));
+      toast.success("Set deleted");
+    } catch (err) {
+      toast.error("Failed to delete set");
+    }
+  }
+
+  async function finishWorkout() {
+    if (!workoutId) return;
+    try {
+      setLoading(true);
+      await api.put(`/workouts/${workoutId}`, { 
+        notes: `${sets.length} sets completed`,
+      });
+      toast.success("Workout saved!");
+      setWorkoutId(null);
+      setSets([]);
+    } catch (err) {
+      toast.error("Failed to save workout");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="space-y-4 p-4 pb-28">
+      {!workoutId ? (
+        <Card title="Start Workout">
+          <div className="space-y-3">
+            <Input
+              label="Workout Label"
+              placeholder="e.g., Chest Day"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+            <Button variant="primary" onClick={startWorkout} loading={loading} className="w-full">
+              Start Workout
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <>
+          <Card className="bg-green-900/30 border-green-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400">Active Workout</p>
+                <p className="font-semibold">{label || "Gym Session"}</p>
+              </div>
+              <Button variant="danger" size="sm" onClick={finishWorkout} loading={loading}>
+                Finish
+              </Button>
+            </div>
+          </Card>
+
+          <Card title="Add Set">
+            <div className="space-y-3">
+              <select
+                className="w-full px-3 py-2.5 rounded-lg bg-gray-700 text-white border-2 border-gray-600 focus:border-blue-500 focus:outline-none"
+                value={selectedExerciseId}
+                onChange={(e) => setSelectedExerciseId(e.target.value)}
+              >
+                <option value="">Select Exercise</option>
+                {exercises.map((ex) => (
+                  <option key={ex.id} value={ex.id}>
+                    {ex.name}
+                  </option>
+                ))}
+              </select>
+
+              {selectedExercise && (
+                <div className="text-xs text-gray-400">
+                  <Badge color="blue">{selectedExercise.muscleGroup}</Badge>
+                </div>
+              )}
+
+              {selectedRecommendation && (
+                <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-2 text-sm text-yellow-200">
+                  💡 {selectedRecommendation.recommendation}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-400">Weight (kg)</label>
+                  <div className="flex items-center gap-1 mt-1">
+                    <Button size="sm" variant="secondary" onClick={() => setWeightKg(Math.max(0, weightKg - 2.5))}>
+                      −
+                    </Button>
+                    <input
+                      type="number"
+                      value={weightKg}
+                      onChange={(e) => setWeightKg(Number(e.target.value))}
+                      className="flex-1 px-2 py-1 rounded bg-gray-700 text-center text-white"
+                    />
+                    <Button size="sm" variant="secondary" onClick={() => setWeightKg(weightKg + 2.5)}>
+                      +
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400">Reps</label>
+                  <div className="flex items-center gap-1 mt-1">
+                    <Button size="sm" variant="secondary" onClick={() => setReps(Math.max(1, reps - 1))}>
+                      −
+                    </Button>
+                    <input
+                      type="number"
+                      value={reps}
+                      onChange={(e) => setReps(Number(e.target.value))}
+                      className="flex-1 px-2 py-1 rounded bg-gray-700 text-center text-white"
+                    />
+                    <Button size="sm" variant="secondary" onClick={() => setReps(reps + 1)}>
+                      +
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-400">RPE (1-10)</label>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={rpe}
+                    onChange={(e) => setRpe(Number(e.target.value))}
+                    className="w-full mt-1"
+                  />
+                  <p className="text-xs text-center mt-1">{rpe}</p>
+                </div>
+
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={isWarmup}
+                      onChange={(e) => setIsWarmup(e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    Warmup Set
+                  </label>
+                </div>
+              </div>
+
+              <Button variant="primary" onClick={addSet} loading={loading} className="w-full">
+                Add Set ({sets.length + 1})
+              </Button>
+            </div>
+          </Card>
+
+          {sets.length > 0 && (
+            <Card title={`Sets (${sets.length})`}>
+              <div className="space-y-2">
+                {sets.map((set) => {
+                  const ex = exercises.find((e) => e.id === set.exerciseId);
+                  return (
+                    <div key={set.id} className="flex items-center justify-between bg-gray-700 p-3 rounded-lg">
+                      <div className="text-sm">
+                        <p className="font-semibold">{ex?.name}</p>
+                        <p className="text-xs text-gray-400">
+                          {set.weightKg}kg × {set.reps} {set.rpe && `@ RPE ${set.rpe}`} {set.isWarmup && "⚡"}
+                        </p>
+                      </div>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => deleteSet(set.id)}
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </main>
+  );
+}
+
+// ─── NUTRITION LOGGER ──────────────────────────────────────────────────
+function NutritionPage() {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [logs, setLogs] = useState<NutritionLog[]>([]);
+  const [totals, setTotals] = useState({ calories: 0, proteinG: 0, carbsG: 0, fatG: 0 });
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [selectedFood, setSelectedFood] = useState<any>(null);
+  const [quantityG, setQuantityG] = useState(100);
+  const [customFoods, setCustomFoods] = useState<any[]>([]);
+  const [mealType, setMealType] = useState("SNACK");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    api.get("/foods/custom").then((res) => setCustomFoods(res.data)).catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    api
+      .get("/nutrition", { params: { date } })
+      .then((res) => {
+        setLogs(res.data.logs);
+        setTotals(res.data.totals);
+      })
+      .catch(() => null);
+  }, [date]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (query.trim().length > 1) {
+        api
+          .get("/foods/search", { params: { q: query } })
+          .then((res) => setSearchResults(res.data))
+          .catch(() => null);
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  async function addFood(food: any) {
+    try {
+      setLoading(true);
+      const scale = quantityG / 100;
+      await api.post("/nutrition", {
+        mealType,
+        foodName: food.name,
+        calories: Math.round(food.caloriesPer100g * scale),
+        proteinG: Number((food.proteinPer100g * scale).toFixed(1)),
+        carbsG: Number((food.carbsPer100g * scale).toFixed(1)),
+        fatG: Number((food.fatPer100g * scale).toFixed(1)),
+        quantityG,
+        openFoodFactsId: food.id,
+        date,
+      });
+      toast.success("Food logged!");
+      setSelectedFood(null);
+      setQuery("");
+      api.get("/nutrition", { params: { date } }).then((res) => {
+        setLogs(res.data.logs);
+        setTotals(res.data.totals);
+      });
+    } catch (err) {
+      toast.error("Failed to log food");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deleteLog(logId: string) {
+    try {
+      await api.delete(`/nutrition/${logId}`);
+      toast.success("Entry deleted");
+      api.get("/nutrition", { params: { date } }).then((res) => {
+        setLogs(res.data.logs);
+        setTotals(res.data.totals);
+      });
+    } catch (err) {
+      toast.error("Failed to delete entry");
+    }
+  }
+
+  const calorieTarget = 2200; // placeholder
+
+  return (
+    <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
+      <Card title="Daily Nutrition">
+        <div className="space-y-3">
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+
+          {/* Calorie Ring */}
+          <div className="bg-gray-700/50 rounded-lg p-4 lg:p-6 text-center">
+            <p className="text-3xl lg:text-4xl font-bold text-green-400">{totals.calories}</p>
+            <p className="text-sm lg:text-base text-gray-400">/ {calorieTarget} kcal</p>
+          </div>
+
+          {/* Macros */}
+          <div className="grid grid-cols-3 gap-2 lg:gap-4">
+            <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 lg:p-4 text-center">
+              <p className="text-xl lg:text-2xl font-bold text-red-300">{Math.round(totals.proteinG)}</p>
+              <p className="text-xs lg:text-sm text-gray-400">Protein (g)</p>
+            </div>
+            <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-3 lg:p-4 text-center">
+              <p className="text-xl lg:text-2xl font-bold text-yellow-300">{Math.round(totals.carbsG)}</p>
+              <p className="text-xs lg:text-sm text-gray-400">Carbs (g)</p>
+            </div>
+            <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-3 lg:p-4 text-center">
+              <p className="text-xl lg:text-2xl font-bold text-blue-300">{Math.round(totals.fatG)}</p>
+              <p className="text-xs lg:text-sm text-gray-400">Fat (g)</p>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card title="Log Food" className="lg:col-span-2">
+          <div className="space-y-3">
+            <Input
+              placeholder="Search foods..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+
+            <select
+              className="w-full px-3 py-2.5 rounded-lg bg-gray-700 text-white border-2 border-gray-600"
+              value={mealType}
+              onChange={(e) => setMealType(e.target.value)}
+            >
+              <option value="BREAKFAST">🍳 Breakfast</option>
+              <option value="LUNCH">🥗 Lunch</option>
+              <option value="DINNER">🍖 Dinner</option>
+              <option value="SNACK">🍎 Snack</option>
+              <option value="PRE_WORKOUT">⚡ Pre-Workout</option>
+              <option value="POST_WORKOUT">💪 Post-Workout</option>
+            </select>
+
+            {selectedFood ? (
+              <div className="bg-gray-700 rounded-lg p-4 space-y-3">
+                <p className="font-semibold">{selectedFood.name}</p>
+                <div className="text-sm text-gray-400">
+                  {selectedFood.caloriesPer100g} kcal / 100g
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400">Quantity (g)</label>
+                  <input
+                    type="number"
+                    value={quantityG}
+                    onChange={(e) => setQuantityG(Number(e.target.value))}
+                    className="w-full mt-1 px-3 py-2 rounded bg-gray-600 text-white"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => addFood(selectedFood)}
+                    loading={loading}
+                    className="flex-1"
+                  >
+                    Add
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setSelectedFood(null)}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-80 lg:max-h-96 overflow-y-auto">
+                {searchResults.slice(0, 8).map((food) => (
+                  <div
+                    key={food.id}
+                    className="bg-gray-700 rounded-lg p-3 cursor-pointer hover:bg-gray-650 transition-colors"
+                    onClick={() => setSelectedFood(food)}
+                  >
+                    <p className="font-semibold text-sm">{food.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {food.caloriesPer100g} kcal | P: {food.proteinPer100g}g | C: {food.carbsPer100g}g | F: {food.fatPer100g}g
+                    </p>
+                  </div>
+                ))}
+                {customFoods.length > 0 && (
+                  <>
+                    <p className="text-xs font-semibold text-gray-400 mt-3">My Foods</p>
+                    {customFoods.slice(0, 5).map((food) => (
+                      <div
+                        key={food.id}
+                        className="bg-gray-700 rounded-lg p-3 cursor-pointer hover:bg-gray-650 transition-colors"
+                        onClick={() =>
+                          setSelectedFood({
+                            id: food.id,
+                            name: food.name,
+                            caloriesPer100g: food.calories,
+                            proteinPer100g: food.proteinG,
+                            carbsPer100g: food.carbsG,
+                            fatPer100g: food.fatG,
+                          })
+                        }
+                      >
+                        <p className="font-semibold text-sm">{food.name}</p>
+                        <p className="text-xs text-gray-400">{food.calories} kcal /100g</p>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {logs.length > 0 && (
+          <Card title={`Entries (${logs.length})`} className="lg:col-span-1">
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {logs.map((log) => (
+                <div key={log.id} className="bg-gray-700 rounded-lg p-2 text-xs lg:text-sm flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="font-semibold">{getMealTypeEmoji(log.mealType)} {log.foodName}</p>
+                    <p className="text-xs text-gray-400">
+                      {log.calories} kcal
+                    </p>
+                  </div>
+                  <Button variant="danger" size="sm" onClick={() => deleteLog(log.id)}>
+                    ✕
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    </main>
+  );
+}
+
+// ─── PROGRESS & ANALYTICS ─────────────────────────────────────────────
+function AnalyticsPage() {
+  const [exerciseId, setExerciseId] = useState("");
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [volume, setVolume] = useState<any[]>([]);
+  const [strength, setStrength] = useState<any[]>([]);
+  const [calories, setCalories] = useState<any[]>([]);
+  const [macros, setMacros] = useState({ proteinG: 0, carbsG: 0, fatG: 0 });
+
+  useEffect(() => {
+    api.get("/exercises").then((res) => setExercises(res.data)).catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    Promise.all([
+      api.get("/progress/volume", { params: { weeks: 8, ...(exerciseId ? { exerciseId } : {}) } }),
+      api.get("/progress/calories", { params: { days: 30 } }),
+      api.get("/progress/macros", { params: { days: 7 } }),
+      ...(exerciseId ? [api.get("/progress/strength", { params: { exerciseId } })] : []),
+    ])
+      .then(([volRes, calRes, macRes, ...rest]) => {
+        setVolume(volRes.data);
+        setCalories(calRes.data);
+        setMacros(macRes.data);
+        if (rest[0]) setStrength(rest[0].data);
+      })
+      .catch(() => null);
+  }, [exerciseId]);
+
+  const macroPieData = [
+    { name: "Protein", value: macros.proteinG },
+    { name: "Carbs", value: macros.carbsG },
+    { name: "Fat", value: macros.fatG },
+  ];
+
+  const COLORS = ["#ef4444", "#eab308", "#3b82f6"];
+
+  return (
+    <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
+      <Card title="Analytics">
+        <div className="space-y-6">
+          <select
+            className="w-full px-3 py-2.5 rounded-lg bg-gray-700 text-white border-2 border-gray-600"
+            value={exerciseId}
+            onChange={(e) => setExerciseId(e.target.value)}
+          >
+            <option value="">Select Exercise (optional)</option>
+            {exercises.map((ex) => (
+              <option key={ex.id} value={ex.id}>
+                {ex.name}
+              </option>
+            ))}
+          </select>
+
+          {calories.length > 0 && (
+            <div>
+              <p className="text-sm lg:text-base font-semibold mb-3">Calories vs Target (30 days)</p>
+              <div className="h-56 lg:h-64 rounded-lg bg-gray-700 p-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={calories}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip contentStyle={{ backgroundColor: "#1f2937", border: "none" }} />
+                    <Line type="monotone" dataKey="calories" stroke="#10b981" strokeWidth={2} />
+                    {calories[0]?.target && (
+                      <Line
+                        type="monotone"
+                        dataKey="target"
+                        stroke="#a78bfa"
+                        strokeDasharray="5 5"
+                        strokeWidth={2}
+                      />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {volume.length > 0 && (
+            <div>
+              <p className="text-sm lg:text-base font-semibold mb-3">Training Volume (8 weeks)</p>
+              <div className="h-56 lg:h-64 rounded-lg bg-gray-700 p-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={volume}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
+                    <XAxis dataKey="week" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip contentStyle={{ backgroundColor: "#1f2937", border: "none" }} />
+                    <Bar dataKey="volume" fill="#3b82f6" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {macros.proteinG > 0 && (
+            <div>
+              <p className="text-sm lg:text-base font-semibold mb-3">Macro Breakdown (7 days)</p>
+              <div className="h-56 lg:h-64 rounded-lg bg-gray-700 p-2 flex items-center justify-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={macroPieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={40}
+                      outerRadius={80}
+                      dataKey="value"
+                      label={{ fontSize: 12 }}
+                    >
+                      {COLORS.map((color, idx) => (
+                        <Cell key={`cell-${idx}`} fill={color} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: "#1f2937", border: "none" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {strength.length > 0 && (
+            <div>
+              <p className="text-sm lg:text-base font-semibold mb-3">Strength Curve (1RM estimate)</p>
+              <div className="h-56 lg:h-64 rounded-lg bg-gray-700 p-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={strength}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip contentStyle={{ backgroundColor: "#1f2937", border: "none" }} />
+                    <Line
+                      type="monotone"
+                      dataKey="estimated1RM"
+                      stroke="#f97316"
+                      strokeWidth={2}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+    </main>
+  );
+}
+
+// ─── AI COACH ──────────────────────────────────────────────────────────
+function CoachPage() {
+  const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  const quickPrompts = [
+    "Review my week",
+    "Suggest progressive overload",
+    "Adjust my diet for this week",
+    "Am I making progress?",
+  ];
+
+  async function sendMessage(text: string) {
+    if (!text.trim()) return;
+
+    try {
+      setLoading(true);
+      const newMessages = [...messages, { role: "user" as const, content: text }];
+      setMessages(newMessages);
+      setMessage("");
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || "http://localhost:3001/api/v1"}/ai/coach`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": localStorage.getItem("gymchad-user-id") || "demo-user",
+          },
+          body: JSON.stringify({
+            message: text,
+            conversationHistory: messages,
+          }),
+        }
+      );
+
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let aiMessage = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value);
+        const lines = text.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.token) {
+                aiMessage += data.token;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  if (updated[updated.length - 1]?.role === "assistant") {
+                    updated[updated.length - 1].content = aiMessage;
+                  } else {
+                    updated.push({ role: "assistant", content: aiMessage });
+                  }
+                  return updated;
+                });
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+    } catch (err) {
+      toast.error("Failed to get response from coach");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-4xl mx-auto w-full">
+      <Card title="AI Coach">
+        <div className="space-y-4 flex flex-col h-96 lg:h-[500px]">
+          <div className="bg-gray-700/50 rounded-lg p-3 lg:p-4 text-sm space-y-3 overflow-y-auto flex-1">
+            {messages.length === 0 ? (
+              <p className="text-gray-400 text-center py-6">Ask your AI coach for personalized advice</p>
+            ) : (
+              messages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-xs lg:max-w-md px-3 py-2 rounded-lg text-sm lg:text-base ${
+                      msg.role === "user"
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-600 text-gray-100"
+                    }`}
+                  >
+                    {msg.content}
+                  </div>
+                </div>
+              ))
+            )}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-gray-600 text-gray-400 px-3 py-2 rounded-lg">
+                  <span className="inline-block animate-pulse">●</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex gap-2 flex-wrap">
+              {quickPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => sendMessage(prompt)}
+                  disabled={loading}
+                  className="text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 px-3 py-1.5 rounded-full transition-colors"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && sendMessage(message)}
+                placeholder="Ask something..."
+                className="flex-1 px-3 py-2.5 rounded-lg bg-gray-700 text-white placeholder-gray-500 border border-gray-600 focus:border-blue-500 focus:outline-none text-sm lg:text-base"
+                disabled={loading}
+              />
+              <Button
+                variant="primary"
+                onClick={() => sendMessage(message)}
+                loading={loading}
+              >
+                Send
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </main>
+  );
+}
+
+// ─── SPLITS MANAGER ────────────────────────────────────────────────────
+function SplitsPage() {
+  const [splits, setSplits] = useState<any[]>([]);
+  const [newSplitName, setNewSplitName] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadSplits();
+  }, []);
+
+  async function loadSplits() {
+    try {
+      setLoading(true);
+      const res = await api.get("/splits");
+      setSplits(res.data);
+    } catch (err) {
+      toast.error("Failed to load splits");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createSplit() {
+    if (!newSplitName.trim()) {
+      toast.error("Enter a split name");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await api.post("/splits", { name: newSplitName, days: [] });
+      toast.success("Split created!");
+      setNewSplitName("");
+      await loadSplits();
+    } catch (err) {
+      toast.error("Failed to create split");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function activateSplit(id: string) {
+    try {
+      await api.put(`/splits/${id}/activate`);
+      toast.success("Split activated!");
+      await loadSplits();
+    } catch (err) {
+      toast.error("Failed to activate split");
+    }
+  }
+
+  async function deleteSplit(id: string) {
+    try {
+      await api.delete(`/splits/${id}`);
+      toast.success("Split deleted");
+      await loadSplits();
+    } catch (err) {
+      toast.error("Failed to delete split");
+    }
+  }
+
+  return (
+    <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
+      <Card title="Splits Manager">
+        <div className="space-y-4">
+          <div className="flex gap-2 flex-col sm:flex-row">
+            <Input
+              placeholder="Split name (e.g., Bro Split)"
+              value={newSplitName}
+              onChange={(e) => setNewSplitName(e.target.value)}
+            />
+            <Button
+              variant="primary"
+              onClick={createSplit}
+              loading={loading}
+              className="w-full sm:w-auto"
+            >
+              Create
+            </Button>
+          </div>
+
+          {loading && splits.length === 0 ? (
+            <p className="text-gray-400 text-sm">Loading splits...</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {splits.length === 0 ? (
+                <p className="text-gray-400 text-sm text-center py-8 col-span-full">No splits created yet</p>
+              ) : (
+                splits.map((split) => (
+                  <div key={split.id} className="bg-gray-700 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex-1">
+                        <p className="font-semibold">{split.name}</p>
+                        <p className="text-xs text-gray-400">{split.days.length} days</p>
+                      </div>
+                      {split.isActive && <Badge color="green">Active</Badge>}
+                    </div>
+                    <div className="flex gap-2 flex-col sm:flex-row">
+                      {!split.isActive && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => activateSplit(split.id)}
+                          className="flex-1"
+                        >
+                          Activate
+                        </Button>
+                      )}
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => deleteSplit(split.id)}
+                        className="flex-1"
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </Card>
+    </main>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────
+export default function App() {
+  const { setUserId } = useAuthStore();
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    // Initialize user ID
+    const stored = localStorage.getItem("gymchad-user-id");
+    if (!stored) {
+      const newId = `guest_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+      setUserId(newId);
+    }
+    setInitialized(true);
+  }, [setUserId]);
+
+  if (!initialized) return null;
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white">
+      <div className="flex h-screen w-full">
+        {/* Desktop Sidebar (hidden on mobile) */}
+        <nav className="hidden lg:flex flex-col w-64 border-r border-gray-700 bg-gray-800 p-4 space-y-4">
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+            GymChad
+          </h1>
+          <div className="space-y-2 flex-1">
+            <NavLink
+              to="/"
+              className={({ isActive }) =>
+                `block px-4 py-2 rounded-lg transition-colors ${
+                  isActive ? "bg-blue-600 text-white" : "text-gray-400 hover:bg-gray-700"
+                }`
+              }
+            >
+              🏠 Dashboard
+            </NavLink>
+            <NavLink
+              to="/workout"
+              className={({ isActive }) =>
+                `block px-4 py-2 rounded-lg transition-colors ${
+                  isActive ? "bg-blue-600 text-white" : "text-gray-400 hover:bg-gray-700"
+                }`
+              }
+            >
+              💪 Workout
+            </NavLink>
+            <NavLink
+              to="/nutrition"
+              className={({ isActive }) =>
+                `block px-4 py-2 rounded-lg transition-colors ${
+                  isActive ? "bg-blue-600 text-white" : "text-gray-400 hover:bg-gray-700"
+                }`
+              }
+            >
+              🍽️ Nutrition
+            </NavLink>
+            <NavLink
+              to="/analytics"
+              className={({ isActive }) =>
+                `block px-4 py-2 rounded-lg transition-colors ${
+                  isActive ? "bg-blue-600 text-white" : "text-gray-400 hover:bg-gray-700"
+                }`
+              }
+            >
+              📊 Analytics
+            </NavLink>
+            <NavLink
+              to="/coach"
+              className={({ isActive }) =>
+                `block px-4 py-2 rounded-lg transition-colors ${
+                  isActive ? "bg-blue-600 text-white" : "text-gray-400 hover:bg-gray-700"
+                }`
+              }
+            >
+              🤖 AI Coach
+            </NavLink>
+            <NavLink
+              to="/splits"
+              className={({ isActive }) =>
+                `block px-4 py-2 rounded-lg transition-colors ${
+                  isActive ? "bg-blue-600 text-white" : "text-gray-400 hover:bg-gray-700"
+                }`
+              }
+            >
+              📋 Splits
+            </NavLink>
+          </div>
+          <div className="border-t border-gray-700 pt-4">
+            <Badge color="blue">PRO</Badge>
+          </div>
+        </nav>
+
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col w-full lg:w-auto max-w-full">
+          {/* Mobile Header */}
+          <header className="sticky top-0 z-40 border-b border-gray-700 bg-gray-900/95 backdrop-blur p-4 lg:hidden">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                GymChad
+              </h1>
+              <Badge color="blue">PRO</Badge>
+            </div>
+          </header>
+
+          {/* Routes */}
+          <div className="flex-1 overflow-y-auto pb-20 lg:pb-4">
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/workout/*" element={<WorkoutPage />} />
+              <Route path="/nutrition" element={<NutritionPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/coach" element={<CoachPage />} />
+              <Route path="/splits" element={<SplitsPage />} />
+            </Routes>
+          </div>
+
+          {/* Mobile Bottom Navigation */}
+          <nav className="fixed bottom-0 left-0 right-0 lg:hidden border-t border-gray-700 bg-gray-900 flex h-16 items-center justify-around z-40">
+            <NavLink
+              to="/"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 h-full text-xs transition-colors ${
+                  isActive ? "text-blue-400 bg-gray-800" : "text-gray-400 hover:text-white"
+                }`
+              }
+            >
+              <span className="text-xl mb-1">🏠</span>
+              <span>Home</span>
+            </NavLink>
+            <NavLink
+              to="/workout"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 h-full text-xs transition-colors ${
+                  isActive ? "text-blue-400 bg-gray-800" : "text-gray-400 hover:text-white"
+                }`
+              }
+            >
+              <span className="text-xl mb-1">💪</span>
+              <span>Workout</span>
+            </NavLink>
+            <NavLink
+              to="/nutrition"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 h-full text-xs transition-colors ${
+                  isActive ? "text-blue-400 bg-gray-800" : "text-gray-400 hover:text-white"
+                }`
+              }
+            >
+              <span className="text-xl mb-1">🍽️</span>
+              <span>Nutrition</span>
+            </NavLink>
+            <NavLink
+              to="/analytics"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 h-full text-xs transition-colors ${
+                  isActive ? "text-blue-400 bg-gray-800" : "text-gray-400 hover:text-white"
+                }`
+              }
+            >
+              <span className="text-xl mb-1">📊</span>
+              <span>Progress</span>
+            </NavLink>
+            <NavLink
+              to="/coach"
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center flex-1 h-full text-xs transition-colors ${
+                  isActive ? "text-blue-400 bg-gray-800" : "text-gray-400 hover:text-white"
+                }`
+              }
+            >
+              <span className="text-xl mb-1">🤖</span>
+              <span>Coach</span>
+            </NavLink>
+          </nav>
+        </div>
+      </div>
+
+      <Toaster position="bottom-center" />
+    </div>
+  );
+}
