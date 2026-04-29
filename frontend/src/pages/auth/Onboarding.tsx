@@ -25,7 +25,7 @@ export function Onboarding() {
     activity_level: 'moderate' as ActivityLevel,
   })
   const [loading, setLoading] = useState(false)
-  const { refreshUser } = useAuthStore()
+  const { setUser } = useAuthStore()
   const navigate = useNavigate()
   const toast = useToast()
 
@@ -45,7 +45,7 @@ export function Onboarding() {
         height_cm: parseFloat(form.height_cm),
         age: parseInt(form.age),
       })
-      useAuthStore.getState().setUser(data)
+      setUser(data)
       navigate('/')
       toast.success('Welcome to GymChad! 💪')
     } catch (err: any) {
