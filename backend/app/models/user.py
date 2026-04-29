@@ -50,8 +50,8 @@ class User(Base):
 
     # Profile / onboarding
     goal: Mapped[Goal] = mapped_column(SAEnum(Goal, name='goal_enum'), default=Goal.MAINTENANCE)
-    activity_level: Mapped[ActivityLevel] = mapped_column(SAEnum(ActivityLevel, name='activity_enum'), default=ActivityLevel.MODERATE)
-    sex: Mapped[Sex | None] = mapped_column(SAEnum(Sex, name='sex_enum'))
+    activity_level: Mapped[ActivityLevel] = mapped_column(SAEnum(ActivityLevel, name='activity_enum', values_callable=lambda x: [e.value for e in x]), default=ActivityLevel.MODERATE)
+    sex: Mapped[Sex | None] = mapped_column(SAEnum(Sex, name='sex_enum', values_callable=lambda x: [e.value for e in x]))
     weight_kg: Mapped[float | None] = mapped_column(Float)
     height_cm: Mapped[float | None] = mapped_column(Float)
     age: Mapped[int | None] = mapped_column(Integer)
