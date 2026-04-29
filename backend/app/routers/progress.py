@@ -235,17 +235,29 @@ async def get_macro_progress(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Average macro breakdown for the past N days."""
+    """Average daily macro breakdown for the past N days."""
     start_date = date.today() - timedelta(days=days)
+
+    # First sum macros per day, then average those daily totals
+    daily_totals = (
+        select(
+            func.sum(NutritionLog.protein_g).label("protein"),
+            func.sum(NutritionLog.carbs_g).label("carbs"),
+            func.sum(NutritionLog.fat_g).label("fat"),
+            func.sum(NutritionLog.calories).label("calories"),
+        )
+        .where(and_(NutritionLog.user_id == current_user.id, NutritionLog.date >= start_date))
+        .group_by(NutritionLog.date)
+        .subquery()
+    )
 
     result = await db.execute(
         select(
-            func.avg(NutritionLog.protein_g).label("avg_protein"),
-            func.avg(NutritionLog.carbs_g).label("avg_carbs"),
-            func.avg(NutritionLog.fat_g).label("avg_fat"),
-            func.avg(NutritionLog.calories).label("avg_calories"),
+            func.avg(daily_totals.c.protein).label("avg_protein"),
+            func.avg(daily_totals.c.carbs).label("avg_carbs"),
+            func.avg(daily_totals.c.fat).label("avg_fat"),
+            func.avg(daily_totals.c.calories).label("avg_calories"),
         )
-        .where(and_(NutritionLog.user_id == current_user.id, NutritionLog.date >= start_date))
     )
     row = result.one()
 

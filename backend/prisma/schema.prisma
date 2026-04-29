@@ -49,6 +49,17 @@ model User {
   goal           Goal           @default(CUTTING)
   currentSplitId String?
   tdee           Int?
+  // Extended profile fields
+  weightKg       Float?
+  heightCm       Float?
+  age            Int?
+  sex            String?
+  activityLevel  String?
+  calorieTarget  Int?
+  proteinTarget  Float?
+  carbsTarget    Float?
+  fatTarget      Float?
+  goalWeightKg   Float?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   splits         Split[]

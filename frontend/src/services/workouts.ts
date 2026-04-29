@@ -5,7 +5,10 @@ export const workoutsApi = {
   list: (params?: { page?: number; limit?: number; date_from?: string; date_to?: string }) =>
     api.get<Workout[]>('/workouts', { params }).then(r => r.data),
 
-  today: () => api.get<Workout[]>('/workouts/today').then(r => r.data),
+  today: () =>
+    api.get<Workout[]>('/workouts/today').then(r =>
+      Array.isArray(r.data) ? r.data : r.data ? [r.data] : []
+    ),
 
   get: (id: string) => api.get<Workout>(`/workouts/${id}`).then(r => r.data),
 
