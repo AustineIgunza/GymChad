@@ -28,13 +28,12 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     """
     Lifespan context: runs once on startup, once on shutdown.
-    In SQLite dev mode, we create all DB tables automatically so there's
-    no manual migration step. In production (PostgreSQL), tables are managed
-    via Supabase dashboard + supabase_setup.sql.
+    In SQLite dev mode, we create all DB tables automatically.
+    seed_exercises() runs on every environment — it's a no-op if exercises exist.
     """
     if IS_SQLITE:
         await init_db()
-        await seed_exercises()
+    await seed_exercises()  # safe to run always — skips if exercises already exist
     yield  # app runs here
 
 

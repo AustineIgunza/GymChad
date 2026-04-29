@@ -1,8 +1,8 @@
 """
-seed.py — Seed global exercises into SQLite for local dev.
+seed.py — Seed global exercises on startup.
 
-Only runs when the exercises table is empty, so it's safe to call on every startup.
-In production (PostgreSQL/Supabase), exercises are seeded via supabase_setup.sql.
+Runs on every startup but is a no-op when the exercises table already has rows.
+Safe to call for both SQLite (dev) and PostgreSQL (production).
 """
 
 import uuid
@@ -136,4 +136,4 @@ async def seed_exercises():
             ))
 
         await db.commit()
-        print(f"[seed] Inserted {len(EXERCISES)} exercises into SQLite.")
+        print(f"[seed] Inserted {len(EXERCISES)} exercises.")
