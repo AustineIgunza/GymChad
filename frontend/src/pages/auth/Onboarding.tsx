@@ -14,42 +14,59 @@ const STEPS = ['goal', 'body', 'activity'] as const
 type Step = typeof STEPS[number]
 
 export function Onboarding() {
+  const { user, setUser } = useAuthStore()
   const [step, setStep] = useState<Step>('goal')
   const [form, setForm] = useState({
-    name: '',
+    name: user?.name || '',
     goal: 'MAINTENANCE' as Goal,
     sex: 'male' as Sex,
-    weight_kg: '',
-    height_cm: '',
-    age: '',
+    weight_kg: user?.weight_kg ? String(user.weight_kg) : '',
+    height_cm: user?.height_cm ? String(user.height_cm) : '',
+    age: user?.age ? String(user.age) : '',
     activity_level: 'moderate' as ActivityLevel,
   })
   const [loading, setLoading] = useState(false)
-  const { setUser } = useAuthStore()
   const navigate = useNavigate()
   const toast = useToast()
 
   const stepIdx = STEPS.indexOf(step)
 
-  const next = () => setStep(STEPS[stepIdx + 1])
+  const next = () => {
+    if (step === 'goal' && !form.name.trim()) {
+      toast.error('Please enter your name')
+      return
+    }
+    setStep(STEPS[stepIdx + 1])
+  }
   const back = () => setStep(STEPS[stepIdx - 1])
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const submit = async () => {
+    const weight = parseFloat(form.weight_kg)
+    const height = parseFloat(form.height_cm)
+    const age = parseInt(form.age)
+
+    if (!weight || !height || !age) {
+      toast.error('Please fill in all body stats')
+      return
+    }
+
     setLoading(true)
     try {
       const { data } = await api.put('/auth/onboarding', {
         ...form,
-        weight_kg: parseFloat(form.weight_kg),
-        height_cm: parseFloat(form.height_cm),
-        age: parseInt(form.age),
+        weight_kg: weight,
+        height_cm: height,
+        age: age,
       })
       setUser(data)
       navigate('/')
       toast.success('Welcome to GymChad! 💪')
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Something went wrong')
+      const detail = err.response?.data?.detail
+      const msg = Array.isArray(detail) ? detail[0]?.msg : detail
+      toast.error(msg || 'Something went wrong')
     } finally {
       setLoading(false)
     }

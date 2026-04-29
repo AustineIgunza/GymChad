@@ -11,6 +11,7 @@ from app.models.measurement import BodyMeasurement
 from app.models.cardio import CardioSession
 from app.models.user import User
 from app.services.calorie_calculator import calculate_streak, projected_fat_loss
+from app.database import IS_SQLITE
 
 router = APIRouter()
 
@@ -117,10 +118,16 @@ async def get_streak(
     """Consecutive active days (workout OR cardio logged)."""
     start = date.today() - timedelta(days=60)
 
+    # Use cross-database date extraction
+    if IS_SQLITE:
+        workout_date_func = func.strftime("%Y-%m-%d", Workout.date)
+    else:
+        workout_date_func = func.date(Workout.date)
+
     workout_result = await db.execute(
-        select(func.date_trunc("day", Workout.date).label("d"))
+        select(workout_date_func.label("d"))
         .where(and_(Workout.user_id == current_user.id, Workout.date >= start))
-        .group_by(func.date_trunc("day", Workout.date))
+        .group_by(workout_date_func)
     )
     workout_dates = [str(r.d)[:10] for r in workout_result.all()]
 
@@ -178,12 +185,16 @@ async def get_fat_loss_projection(
 
     # Average daily calories consumed over last 14 days
     start = date.today() - timedelta(days=14)
-    cal_result = await db.execute(
-        select(func.avg(func.sum(NutritionLog.calories)).over())
+    
+    # Cross-database compatible aggregation for average daily calories
+    # We subquery to get daily sums first, then average them
+    daily_sums = (
+        select(func.sum(NutritionLog.calories).label("day_total"))
         .where(and_(NutritionLog.user_id == current_user.id, NutritionLog.date >= start))
         .group_by(NutritionLog.date)
-        .limit(1)
+        .subquery()
     )
+    cal_result = await db.execute(select(func.avg(daily_sums.c.day_total)))
     row = cal_result.scalar()
     avg_daily_intake = float(row) if row else float(current_user.calorie_target)
 

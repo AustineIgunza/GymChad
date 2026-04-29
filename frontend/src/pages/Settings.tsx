@@ -38,39 +38,58 @@ export function SettingsPage() {
   })
 
   const saveProfile = async () => {
+    const weight = parseFloat(form.weight_kg)
+    const height = parseFloat(form.height_cm)
+    const age = parseInt(form.age)
+    const goalWeight = parseFloat(form.goal_weight_kg)
+
+    if (form.weight_kg && isNaN(weight)) {
+      toast.error('Invalid weight')
+      return
+    }
+
     setSaving(true)
     try {
       const { data } = await api.put('/auth/profile', {
         ...form,
-        weight_kg: parseFloat(form.weight_kg) || undefined,
-        height_cm: parseFloat(form.height_cm) || undefined,
-        age: parseInt(form.age) || undefined,
-        goal_weight_kg: parseFloat(form.goal_weight_kg) || undefined,
+        weight_kg: isNaN(weight) ? undefined : weight,
+        height_cm: isNaN(height) ? undefined : height,
+        age: isNaN(age) ? undefined : age,
+        goal_weight_kg: isNaN(goalWeight) ? undefined : goalWeight,
       })
       useAuthStore.getState().setUser(data)
       setProfileModal(false)
       toast.success('Profile updated!')
-    } catch {
-      toast.error('Failed to save profile')
+    } catch (err: any) {
+      const detail = err.response?.data?.detail
+      const msg = Array.isArray(detail) ? detail[0]?.msg : detail
+      toast.error(msg || 'Failed to save profile')
     } finally {
       setSaving(false)
     }
   }
 
   const saveNutrition = async () => {
+    const cal = parseInt(nutrForm.calorie_target)
+    const prot = parseInt(nutrForm.protein_target)
+    const carbs = parseInt(nutrForm.carbs_target)
+    const fat = parseInt(nutrForm.fat_target)
+
     setSaving(true)
     try {
       const { data } = await api.put('/auth/profile', {
-        calorie_target: parseInt(nutrForm.calorie_target) || undefined,
-        protein_target: parseInt(nutrForm.protein_target) || undefined,
-        carbs_target: parseInt(nutrForm.carbs_target) || undefined,
-        fat_target: parseInt(nutrForm.fat_target) || undefined,
+        calorie_target: isNaN(cal) ? undefined : cal,
+        protein_target: isNaN(prot) ? undefined : prot,
+        carbs_target: isNaN(carbs) ? undefined : carbs,
+        fat_target: isNaN(fat) ? undefined : fat,
       })
       useAuthStore.getState().setUser(data)
       setNutritionModal(false)
       toast.success('Nutrition targets updated!')
-    } catch {
-      toast.error('Failed to save targets')
+    } catch (err: any) {
+      const detail = err.response?.data?.detail
+      const msg = Array.isArray(detail) ? detail[0]?.msg : detail
+      toast.error(msg || 'Failed to save targets')
     } finally {
       setSaving(false)
     }
