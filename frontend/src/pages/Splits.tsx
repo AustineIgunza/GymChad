@@ -132,7 +132,10 @@ export function SplitsPage() {
   // Custom form state
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
-  const [days, setDays] = useState([{ label: 'Day 1', exercises: [] as string[] }])
+
+  interface DayExercise { exercise_id: string; sets: number; repsMin: number; repsMax: number }
+  interface DayState { label: string; exercises: DayExercise[] }
+  const [days, setDays] = useState<DayState[]>([{ label: 'Day 1', exercises: [] }])
 
   useEffect(() => {
     Promise.all([
@@ -182,8 +185,8 @@ export function SplitsPage() {
       setSplits(s => [newSplit, ...s])
       setTemplateModal(false)
       toast.success(`${template.name} created! You can customise exercises in the split.`)
-    } catch {
-      toast.error('Failed to create split from template')
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to create split from template')
     } finally {
       setSavingTemplate(null)
     }
@@ -198,7 +201,13 @@ export function SplitsPage() {
         days: days.map((d, i) => ({
           day_number: i + 1,
           label: d.label,
-          exercises: d.exercises.map((exId, order) => ({ exercise_id: exId, order })),
+          exercises: d.exercises.map((ex, order) => ({
+            exercise_id: ex.exercise_id,
+            order,
+            target_sets: ex.sets,
+            target_reps_min: ex.repsMin,
+            target_reps_max: ex.repsMax,
+          })),
         })),
       })
       setSplits(s => [newSplit, ...s])
@@ -215,10 +224,22 @@ export function SplitsPage() {
   const addDay = () => setDays(d => [...d, { label: `Day ${d.length + 1}`, exercises: [] }])
   const removeDay = (i: number) => setDays(d => d.filter((_, idx) => idx !== i))
   const toggleExercise = (dayIdx: number, exId: string) => {
-    setDays(d => d.map((day, i) => i === dayIdx
-      ? { ...day, exercises: day.exercises.includes(exId) ? day.exercises.filter(e => e !== exId) : [...day.exercises, exId] }
-      : day
-    ))
+    setDays(d => d.map((day, i) => {
+      if (i !== dayIdx) return day
+      const exists = day.exercises.find(e => e.exercise_id === exId)
+      return {
+        ...day,
+        exercises: exists
+          ? day.exercises.filter(e => e.exercise_id !== exId)
+          : [...day.exercises, { exercise_id: exId, sets: 3, repsMin: 8, repsMax: 12 }],
+      }
+    }))
+  }
+  const updateExercise = (dayIdx: number, exId: string, field: 'sets' | 'repsMin' | 'repsMax', val: number) => {
+    setDays(d => d.map((day, i) => i !== dayIdx ? day : {
+      ...day,
+      exercises: day.exercises.map(e => e.exercise_id === exId ? { ...e, [field]: val } : e),
+    }))
   }
 
   return (
@@ -408,20 +429,56 @@ export function SplitsPage() {
                       </button>
                     )}
                   </div>
-                  <p className="text-xs text-text-muted mb-1.5">Select exercises:</p>
-                  <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
-                    {exercises.filter(e => !['CARDIO'].includes(e.muscle_group)).map(ex => (
-                      <button
-                        key={ex.id}
-                        onClick={() => toggleExercise(dayIdx, ex.id)}
-                        className={`px-2 py-1 rounded-lg text-xs transition-colors ${day.exercises.includes(ex.id) ? 'bg-primary-700 text-white' : 'bg-bg-secondary text-text-secondary hover:bg-bg-hover'}`}
-                      >
-                        {ex.name}
-                      </button>
-                    ))}
+                  <p className="text-xs text-text-muted mb-1.5">Tap to add exercises:</p>
+                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto mb-2">
+                    {exercises.filter(e => e.muscle_group !== 'CARDIO').map(ex => {
+                      const selected = day.exercises.find(e => e.exercise_id === ex.id)
+                      return (
+                        <button
+                          key={ex.id}
+                          onClick={() => toggleExercise(dayIdx, ex.id)}
+                          className={`px-2 py-1 rounded-lg text-xs transition-colors ${selected ? 'bg-primary-700 text-white' : 'bg-bg-secondary text-text-secondary hover:bg-bg-hover'}`}
+                        >
+                          {ex.name}
+                        </button>
+                      )
+                    })}
                   </div>
                   {day.exercises.length > 0 && (
-                    <p className="text-xs text-text-muted mt-1.5">{day.exercises.length} exercises selected</p>
+                    <div className="space-y-1.5 mt-2 pt-2 border-t border-border">
+                      <p className="text-xs font-medium text-text-muted mb-1">Sets & reps:</p>
+                      {day.exercises.map(ex => {
+                        const exInfo = exercises.find(e => e.id === ex.exercise_id)
+                        return (
+                          <div key={ex.exercise_id} className="flex items-center gap-2">
+                            <p className="text-xs text-text-primary flex-1 truncate">{exInfo?.name}</p>
+                            <input
+                              type="number" min={1} max={10}
+                              value={ex.sets}
+                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'sets', parseInt(e.target.value) || 3)}
+                              className="w-10 text-center text-xs bg-bg-secondary border border-border rounded-lg py-1 text-text-primary"
+                              title="Sets"
+                            />
+                            <span className="text-xs text-text-muted">×</span>
+                            <input
+                              type="number" min={1} max={30}
+                              value={ex.repsMin}
+                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'repsMin', parseInt(e.target.value) || 8)}
+                              className="w-10 text-center text-xs bg-bg-secondary border border-border rounded-lg py-1 text-text-primary"
+                              title="Min reps"
+                            />
+                            <span className="text-xs text-text-muted">–</span>
+                            <input
+                              type="number" min={1} max={30}
+                              value={ex.repsMax}
+                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'repsMax', parseInt(e.target.value) || 12)}
+                              className="w-10 text-center text-xs bg-bg-secondary border border-border rounded-lg py-1 text-text-primary"
+                              title="Max reps"
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
               ))}

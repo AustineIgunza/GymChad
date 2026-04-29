@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, X, PencilLine } from 'lucide-react'
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, X, PencilLine, Star } from 'lucide-react'
 import { nutritionApi } from '../services/nutrition'
 import { useAuthStore } from '../stores/authStore'
 import { useToast } from '../stores/uiStore'
@@ -18,7 +18,36 @@ const MEAL_LABELS: Record<MealType, string> = {
 }
 const MEAL_TYPES: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK', 'PRE_WORKOUT', 'POST_WORKOUT']
 
-type AddMode = 'search' | 'manual'
+// Built-in common foods (calories & macros per 100g)
+const COMMON_FOODS: FoodSearchResult[] = [
+  { id: 'cf1',  name: 'Chicken Breast (cooked)',   calories_per_100g: 165, protein_per_100g: 31,  carbs_per_100g: 0,   fat_per_100g: 3.6 },
+  { id: 'cf2',  name: 'White Rice (cooked)',        calories_per_100g: 130, protein_per_100g: 2.7, carbs_per_100g: 28,  fat_per_100g: 0.3 },
+  { id: 'cf3',  name: 'Eggs (whole)',               calories_per_100g: 155, protein_per_100g: 13,  carbs_per_100g: 1.1, fat_per_100g: 11  },
+  { id: 'cf4',  name: 'Oats (dry)',                 calories_per_100g: 389, protein_per_100g: 17,  carbs_per_100g: 66,  fat_per_100g: 7   },
+  { id: 'cf5',  name: 'Whole Milk',                 calories_per_100g: 61,  protein_per_100g: 3.2, carbs_per_100g: 4.8, fat_per_100g: 3.3 },
+  { id: 'cf6',  name: 'Greek Yogurt (plain)',       calories_per_100g: 59,  protein_per_100g: 10,  carbs_per_100g: 3.6, fat_per_100g: 0.4 },
+  { id: 'cf7',  name: 'Salmon (cooked)',            calories_per_100g: 208, protein_per_100g: 20,  carbs_per_100g: 0,   fat_per_100g: 13  },
+  { id: 'cf8',  name: 'Sweet Potato (cooked)',      calories_per_100g: 86,  protein_per_100g: 1.6, carbs_per_100g: 20,  fat_per_100g: 0.1 },
+  { id: 'cf9',  name: 'Broccoli (cooked)',          calories_per_100g: 35,  protein_per_100g: 2.4, carbs_per_100g: 7.2, fat_per_100g: 0.4 },
+  { id: 'cf10', name: 'Banana',                     calories_per_100g: 89,  protein_per_100g: 1.1, carbs_per_100g: 23,  fat_per_100g: 0.3 },
+  { id: 'cf11', name: 'Peanut Butter',              calories_per_100g: 588, protein_per_100g: 25,  carbs_per_100g: 20,  fat_per_100g: 50  },
+  { id: 'cf12', name: 'Whey Protein (scoop)',       calories_per_100g: 380, protein_per_100g: 80,  carbs_per_100g: 8,   fat_per_100g: 5   },
+  { id: 'cf13', name: 'Bread (white)',              calories_per_100g: 265, protein_per_100g: 9,   carbs_per_100g: 49,  fat_per_100g: 3.2 },
+  { id: 'cf14', name: 'Tuna (canned, in water)',    calories_per_100g: 116, protein_per_100g: 26,  carbs_per_100g: 0,   fat_per_100g: 1   },
+  { id: 'cf15', name: 'Beef Mince (lean, cooked)',  calories_per_100g: 215, protein_per_100g: 26,  carbs_per_100g: 0,   fat_per_100g: 12  },
+  { id: 'cf16', name: 'Pasta (cooked)',             calories_per_100g: 131, protein_per_100g: 5,   carbs_per_100g: 25,  fat_per_100g: 1.1 },
+  { id: 'cf17', name: 'Avocado',                    calories_per_100g: 160, protein_per_100g: 2,   carbs_per_100g: 9,   fat_per_100g: 15  },
+  { id: 'cf18', name: 'Almonds',                    calories_per_100g: 579, protein_per_100g: 21,  carbs_per_100g: 22,  fat_per_100g: 50  },
+  { id: 'cf19', name: 'Cottage Cheese',             calories_per_100g: 98,  protein_per_100g: 11,  carbs_per_100g: 3.4, fat_per_100g: 4.3 },
+  { id: 'cf20', name: 'Orange Juice',               calories_per_100g: 45,  protein_per_100g: 0.7, carbs_per_100g: 10,  fat_per_100g: 0.2 },
+  { id: 'cf21', name: 'Olive Oil',                  calories_per_100g: 884, protein_per_100g: 0,   carbs_per_100g: 0,   fat_per_100g: 100 },
+  { id: 'cf22', name: 'Potato (boiled)',             calories_per_100g: 87,  protein_per_100g: 1.9, carbs_per_100g: 20,  fat_per_100g: 0.1 },
+  { id: 'cf23', name: 'Cottage Loaf / Chapati',     calories_per_100g: 328, protein_per_100g: 9,   carbs_per_100g: 57,  fat_per_100g: 7.5 },
+  { id: 'cf24', name: 'Beef Steak (lean, cooked)',  calories_per_100g: 271, protein_per_100g: 29,  carbs_per_100g: 0,   fat_per_100g: 17  },
+  { id: 'cf25', name: 'Apple',                      calories_per_100g: 52,  protein_per_100g: 0.3, carbs_per_100g: 14,  fat_per_100g: 0.2 },
+]
+
+type AddMode = 'common' | 'search' | 'manual'
 
 interface ManualFood {
   name: string
@@ -44,7 +73,7 @@ export function NutritionPage() {
   const [summary, setSummary] = useState<DailySummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [addModal, setAddModal] = useState(false)
-  const [addMode, setAddMode] = useState<AddMode>('search')
+  const [addMode, setAddMode] = useState<AddMode>('common')
   const [searchQ, setSearchQ] = useState('')
   const [searchResults, setSearchResults] = useState<FoodSearchResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -159,7 +188,7 @@ export function NutritionPage() {
     setSearchQ('')
     setSearchResults([])
     setManualFood(defaultManual)
-    setAddMode('search')
+    setAddMode('common')
   }
 
   const groupedLogs = MEAL_TYPES.reduce((acc, m) => {
@@ -303,16 +332,22 @@ export function NutritionPage() {
         {/* Mode toggle */}
         <div className="flex gap-1 p-1 bg-bg-tertiary rounded-xl mb-4">
           <button
+            onClick={() => { setAddMode('common'); setSelectedFood(null) }}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'common' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
+          >
+            <Star className="w-3.5 h-3.5" /> Common
+          </button>
+          <button
             onClick={() => { setAddMode('search'); setSelectedFood(null) }}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'search' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
           >
-            <Search className="w-3.5 h-3.5" /> Search Database
+            <Search className="w-3.5 h-3.5" /> Search
           </button>
           <button
             onClick={() => { setAddMode('manual'); setSelectedFood(null) }}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'manual' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
           >
-            <PencilLine className="w-3.5 h-3.5" /> Manual Entry
+            <PencilLine className="w-3.5 h-3.5" /> Manual
           </button>
         </div>
 
@@ -331,6 +366,50 @@ export function NutritionPage() {
             ))}
           </div>
         </div>
+
+        {/* ── COMMON FOODS MODE ── */}
+        {addMode === 'common' && (
+          !selectedFood ? (
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {COMMON_FOODS.map((food) => (
+                <button
+                  key={food.id}
+                  onClick={() => setSelectedFood(food)}
+                  className="w-full text-left p-3 rounded-xl bg-bg-tertiary hover:bg-bg-hover transition-colors border border-border"
+                >
+                  <p className="text-sm font-medium text-text-primary leading-tight">{food.name}</p>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    {food.calories_per_100g} kcal · {food.protein_per_100g}g P · {food.carbs_per_100g}g C · {food.fat_per_100g}g F per 100g
+                  </p>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-semibold text-text-primary text-sm leading-snug flex-1">{selectedFood.name}</p>
+                <button onClick={() => setSelectedFood(null)} className="text-text-muted hover:text-text-primary flex-shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <Input label="Quantity (g)" type="number" value={quantity} onChange={e => setQuantity(e.target.value)} />
+              <div className="grid grid-cols-4 gap-2 p-3 bg-bg-tertiary rounded-xl text-center">
+                {[
+                  { label: 'Calories', val: macros.calories },
+                  { label: 'Protein', val: `${macros.protein_g}g` },
+                  { label: 'Carbs', val: `${macros.carbs_g}g` },
+                  { label: 'Fat', val: `${macros.fat_g}g` },
+                ].map(({ label, val }) => (
+                  <div key={label}>
+                    <div className="text-sm font-bold text-text-primary">{val}</div>
+                    <div className="text-xs text-text-muted">{label}</div>
+                  </div>
+                ))}
+              </div>
+              <Button fullWidth loading={saving} onClick={handleLog}>Log Food</Button>
+            </div>
+          )
+        )}
 
         {/* ── SEARCH MODE ── */}
         {addMode === 'search' && (

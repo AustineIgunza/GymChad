@@ -69,14 +69,17 @@ export function Dashboard() {
     const steps = parseInt(stepsInput)
     if (!steps || steps < 0) return
     setSavingSteps(true)
+    // Optimistic update — show immediately, no waiting
+    setActivity(prev => prev ? { ...prev, steps } : prev)
+    setShowStepsInput(false)
+    setStepsInput('')
     try {
       await api.post('/cardio/activity', { date: today, steps })
-      const r = await api.get('/cardio/activity/today')
-      setActivity(r.data)
-      setShowStepsInput(false)
-      setStepsInput('')
+      // Refresh with accurate server data in background
+      api.get('/cardio/activity/today').then(r => setActivity(r.data)).catch(() => {})
     } catch {
       toast.error('Failed to save steps')
+      fetchAll() // revert
     } finally {
       setSavingSteps(false)
     }
@@ -163,7 +166,10 @@ export function Dashboard() {
         <motion.div variants={item}>
           <Card padding="md">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-text-primary">Daily Energy</h3>
+              <div>
+                <h3 className="font-semibold text-text-primary">Daily Energy</h3>
+                <p className="text-xs text-text-disabled">BMR estimated · adjust targets in <Link to="/settings" className="text-primary-400">Settings</Link></p>
+              </div>
               <button
                 onClick={() => setShowStepsInput(s => !s)}
                 className="flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors"
