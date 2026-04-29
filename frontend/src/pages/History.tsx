@@ -86,8 +86,8 @@ export function HistoryPage() {
               </div>
               <div className="space-y-2">
                 {dayWorkouts.map(w => {
-                  const muscles = [...new Set(w.sets.map(s => s.exercise?.muscle_group).filter(Boolean))]
-                  const workingSets = w.sets.filter(s => !s.is_warmup)
+                  const muscles = [...new Set((w.sets || []).map(s => s.exercise?.muscle_group).filter(Boolean))]
+                  const workingSets = (w.sets || []).filter(s => !s.is_warmup)
                   const totalVolume = workingSets.reduce((a, s) => a + s.reps * s.weight_kg, 0)
                   const isExpanded = expandedId === w.id
 
@@ -134,7 +134,7 @@ export function HistoryPage() {
                           {/* Group by exercise */}
                           {(() => {
                             const byExercise: Record<string, typeof w.sets> = {}
-                            w.sets.forEach(s => {
+                            ;(w.sets || []).forEach(s => {
                               const name = s.exercise?.name || 'Unknown'
                               if (!byExercise[name]) byExercise[name] = []
                               byExercise[name].push(s)

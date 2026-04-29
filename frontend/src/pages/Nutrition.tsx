@@ -163,7 +163,7 @@ export function NutritionPage() {
   }
 
   const groupedLogs = MEAL_TYPES.reduce((acc, m) => {
-    acc[m] = summary?.logs.filter(l => l.meal_type === m) || []
+    acc[m] = summary?.logs?.filter(l => l.meal_type === m) || []
     return acc
   }, {} as Record<MealType, NutritionLog[]>)
 
@@ -275,7 +275,7 @@ export function NutritionPage() {
           )
         })}
 
-        {!loading && !summary?.logs.length && (
+        {!loading && !summary?.logs?.length && (
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}

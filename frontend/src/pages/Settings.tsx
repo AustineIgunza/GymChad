@@ -13,7 +13,7 @@ import { PageHeader } from '../components/ui/PageHeader'
 import type { Goal, ActivityLevel } from '../types'
 
 export function SettingsPage() {
-  const { user, refreshUser, logout } = useAuthStore()
+  const { user, logout } = useAuthStore()
   const [profileModal, setProfileModal] = useState(false)
   const [nutritionModal, setNutritionModal] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -40,14 +40,14 @@ export function SettingsPage() {
   const saveProfile = async () => {
     setSaving(true)
     try {
-      await api.put('/auth/profile', {
+      const { data } = await api.put('/auth/profile', {
         ...form,
         weight_kg: parseFloat(form.weight_kg) || undefined,
         height_cm: parseFloat(form.height_cm) || undefined,
         age: parseInt(form.age) || undefined,
         goal_weight_kg: parseFloat(form.goal_weight_kg) || undefined,
       })
-      await refreshUser()
+      useAuthStore.getState().setUser(data)
       setProfileModal(false)
       toast.success('Profile updated!')
     } catch {
@@ -60,13 +60,13 @@ export function SettingsPage() {
   const saveNutrition = async () => {
     setSaving(true)
     try {
-      await api.put('/auth/profile', {
+      const { data } = await api.put('/auth/profile', {
         calorie_target: parseInt(nutrForm.calorie_target) || undefined,
         protein_target: parseInt(nutrForm.protein_target) || undefined,
         carbs_target: parseInt(nutrForm.carbs_target) || undefined,
         fat_target: parseInt(nutrForm.fat_target) || undefined,
       })
-      await refreshUser()
+      useAuthStore.getState().setUser(data)
       setNutritionModal(false)
       toast.success('Nutrition targets updated!')
     } catch {

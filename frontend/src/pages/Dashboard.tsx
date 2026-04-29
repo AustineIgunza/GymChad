@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Dumbbell, Settings, ChevronRight, Zap, TrendingUp, ChevronDown, Footprints } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
+import { useToast } from '../stores/uiStore'
 import { workoutsApi } from '../services/workouts'
 import { nutritionApi } from '../services/nutrition'
 import api from '../services/api'
@@ -33,6 +34,7 @@ interface TodayActivity {
 export function Dashboard() {
   const { user } = useAuthStore()
   const navigate = useNavigate()
+  const toast = useToast()
   const [todayWorkouts, setTodayWorkouts] = useState<Workout[]>([])
   const [nutrition, setNutrition] = useState<DailySummary | null>(null)
   const [recommendations, setRecommendations] = useState<any[]>([])
@@ -69,11 +71,12 @@ export function Dashboard() {
     setSavingSteps(true)
     try {
       await api.post('/cardio/activity', { date: today, steps })
-      await api.get('/cardio/activity/today').then(r => setActivity(r.data))
+      const r = await api.get('/cardio/activity/today')
+      setActivity(r.data)
       setShowStepsInput(false)
       setStepsInput('')
     } catch {
-      // ignore
+      toast.error('Failed to save steps')
     } finally {
       setSavingSteps(false)
     }
