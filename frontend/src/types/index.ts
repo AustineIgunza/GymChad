@@ -26,7 +26,7 @@ export interface User {
   carbs_target: number | null
   fat_target: number | null
   goal_weight_kg: number | null
-  steps_today: number
+  steps_today?: number
   created_at: string
 }
 

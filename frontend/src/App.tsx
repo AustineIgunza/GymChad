@@ -55,6 +55,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     )
   }
   if (!user) return <Navigate to="/login" replace />
+  // New user hasn't done onboarding yet
+  const needsOnboarding = !user.weight_kg && !user.calorie_target
+  if (needsOnboarding && window.location.pathname !== '/onboarding') {
+    return <Navigate to="/onboarding" replace />
+  }
   return <>{children}</>
 }
 

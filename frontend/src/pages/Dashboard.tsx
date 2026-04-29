@@ -79,8 +79,8 @@ export function Dashboard() {
     }
   }
 
-  const totalSets = todayWorkouts.reduce((acc, w) => acc + w.sets.filter(s => !s.is_warmup).length, 0)
-  const musclesHit = [...new Set(todayWorkouts.flatMap(w => w.sets.map(s => s.exercise?.muscle_group).filter(Boolean)))]
+  const totalSets = todayWorkouts.reduce((acc, w) => acc + (w.sets || []).filter(s => !s.is_warmup).length, 0)
+  const musclesHit = [...new Set(todayWorkouts.flatMap(w => (w.sets || []).map(s => s.exercise?.muscle_group).filter(Boolean)))]
 
   // Net calories = burned - eaten
   const caloriesEaten = nutrition?.total_calories || 0
@@ -364,7 +364,7 @@ export function Dashboard() {
             { to: '/splits', icon: '📋', label: 'My Splits', desc: 'Manage programs' },
             { to: '/history', icon: '📅', label: 'History', desc: 'Past workouts' },
             { to: '/analytics', icon: '📊', label: 'Analytics', desc: 'Progress charts' },
-            { to: '/coach', icon: '🤖', label: 'AI Coach', desc: 'Get guidance' },
+            { to: '/settings', icon: '⚙️', label: 'Settings', desc: 'Profile & targets' },
           ].map(({ to, icon, label, desc }, i) => (
             <motion.div
               key={to}

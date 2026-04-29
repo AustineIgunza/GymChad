@@ -22,7 +22,8 @@ async function verifyWithBackend(supabaseUser: { id: string; email?: string; use
       name: supabaseUser.user_metadata?.full_name,
     })
     return data
-  } catch {
+  } catch (err: any) {
+    console.error('[GymChad] Backend verify failed:', err?.message || err)
     return null
   }
 }
