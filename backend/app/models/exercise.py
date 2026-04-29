@@ -25,7 +25,7 @@ class Exercise(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    muscle_group: Mapped[MuscleGroup] = mapped_column(SAEnum(MuscleGroup), nullable=False, index=True)
+    muscle_group: Mapped[MuscleGroup] = mapped_column(SAEnum(MuscleGroup, name='muscle_enum'), nullable=False, index=True)
     # is_custom=True means a user created it; user_id links to the creator
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
     user_id: Mapped[str | None] = mapped_column(String, index=True)  # NULL = global exercise

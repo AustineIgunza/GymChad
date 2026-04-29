@@ -32,7 +32,7 @@ class CardioSession(Base):
     date: Mapped[date_type] = mapped_column(Date, nullable=False, index=True)
     workout_id: Mapped[str | None] = mapped_column(String, ForeignKey("workouts.id", ondelete="SET NULL"))
 
-    cardio_type: Mapped[CardioType] = mapped_column(SAEnum(CardioType), nullable=False)
+    cardio_type: Mapped[CardioType] = mapped_column(SAEnum(CardioType, name='cardio_type_enum'), nullable=False)
     duration_min: Mapped[float] = mapped_column(Float, nullable=False)
     calories_burned: Mapped[float | None] = mapped_column(Float)
 

@@ -49,9 +49,9 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(String)
 
     # Profile / onboarding
-    goal: Mapped[Goal] = mapped_column(SAEnum(Goal), default=Goal.MAINTENANCE)
-    activity_level: Mapped[ActivityLevel] = mapped_column(SAEnum(ActivityLevel), default=ActivityLevel.MODERATE)
-    sex: Mapped[Sex | None] = mapped_column(SAEnum(Sex))
+    goal: Mapped[Goal] = mapped_column(SAEnum(Goal, name='goal_enum'), default=Goal.MAINTENANCE)
+    activity_level: Mapped[ActivityLevel] = mapped_column(SAEnum(ActivityLevel, name='activity_enum'), default=ActivityLevel.MODERATE)
+    sex: Mapped[Sex | None] = mapped_column(SAEnum(Sex, name='sex_enum'))
     weight_kg: Mapped[float | None] = mapped_column(Float)
     height_cm: Mapped[float | None] = mapped_column(Float)
     age: Mapped[int | None] = mapped_column(Integer)
@@ -66,7 +66,7 @@ class User(Base):
 
     # Preferences
     use_kg: Mapped[bool] = mapped_column(Boolean, default=True)
-    plan: Mapped[Plan] = mapped_column(SAEnum(Plan), default=Plan.FREE)
+    plan: Mapped[Plan] = mapped_column(SAEnum(Plan, name='plan_enum'), default=Plan.FREE)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
