@@ -10,6 +10,14 @@ import httpx
 from typing import Any
 
 
+def _is_english(text: str) -> bool:
+    """Return True if the string is mostly ASCII (Latin alphabet)."""
+    if not text:
+        return False
+    ascii_count = sum(1 for c in text if ord(c) < 128)
+    return ascii_count / len(text) >= 0.85
+
+
 async def search_open_food_facts(query: str, page_size: int = 20) -> list[dict[str, Any]]:
     """
     Search Open Food Facts for foods matching the query string.
@@ -25,10 +33,10 @@ async def search_open_food_facts(query: str, page_size: int = 20) -> list[dict[s
                 params={
                     "search_terms": query,
                     "json": 1,
-                    "page_size": page_size,
-                    # Only fetch the fields we need — reduces response size significantly
-                    "fields": "product_name,brands,nutriments,serving_size,image_thumb_url",
-                    "sort_by": "unique_scans_n",  # Most scanned = most popular
+                    "page_size": page_size * 3,  # fetch more so we have enough after filtering
+                    "lc": "en",                   # language: English
+                    "fields": "product_name,brands,nutriments,serving_size,image_thumb_url,lang",
+                    "sort_by": "unique_scans_n",  # most scanned = most popular / reliable
                 },
             )
             response.raise_for_status()
@@ -42,12 +50,7 @@ async def search_open_food_facts(query: str, page_size: int = 20) -> list[dict[s
         nutriments = product.get("nutriments", {})
 
         # Only include products with complete macro data
-        required_fields = [
-            "energy-kcal_100g",
-            "proteins_100g",
-            "carbohydrates_100g",
-            "fat_100g",
-        ]
+        required_fields = ["energy-kcal_100g", "proteins_100g", "carbohydrates_100g", "fat_100g"]
         if not all(k in nutriments for k in required_fields):
             continue
 
@@ -55,7 +58,11 @@ async def search_open_food_facts(query: str, page_size: int = 20) -> list[dict[s
         if not name:
             continue
 
-        brand = product.get("brands", "").strip()
+        # Skip non-English product names (prevents results in Arabic, Chinese, etc.)
+        if not _is_english(name):
+            continue
+
+        brand = product.get("brands", "").split(",")[0].strip()  # first brand only
         display_name = f"{name} — {brand}" if brand else name
 
         results.append({
@@ -70,4 +77,7 @@ async def search_open_food_facts(query: str, page_size: int = 20) -> list[dict[s
             "image_url": product.get("image_thumb_url"),
         })
 
-    return results[:page_size]
+        if len(results) >= page_size:
+            break
+
+    return results

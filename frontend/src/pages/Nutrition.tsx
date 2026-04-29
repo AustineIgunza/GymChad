@@ -165,21 +165,22 @@ const FOOD_CATEGORIES: FoodCategory[] = ['All', 'Protein', 'Carbs', 'Dairy', 'Ve
 
 type AddMode = 'common' | 'search' | 'manual'
 
+// Manual entry stores per-100g values + quantity, same pattern as common foods
 interface ManualFood {
   name: string
-  calories: string
-  protein_g: string
-  carbs_g: string
-  fat_g: string
+  cal100: string   // calories per 100g
+  pro100: string   // protein per 100g
+  carb100: string  // carbs per 100g
+  fat100: string   // fat per 100g
   quantity_g: string
 }
 
 const defaultManual: ManualFood = {
   name: '',
-  calories: '',
-  protein_g: '',
-  carbs_g: '',
-  fat_g: '',
+  cal100: '',
+  pro100: '',
+  carb100: '',
+  fat100: '',
   quantity_g: '100',
 }
 
@@ -248,43 +249,60 @@ export function NutritionPage() {
   const handleLog = async () => {
     if (!selectedFood) return
     setSaving(true)
+    const g = parseFloat(quantity) || 100
+    const macros = calcMacros(selectedFood, g)
+    // Optimistic update — add to summary immediately, then sync in background
+    const tempId = `temp_${Date.now()}`
+    const tempLog = { id: tempId, user_id: '', created_at: '', date, meal_type: mealType, food_name: selectedFood.name, quantity_g: g, ...macros }
+    setSummary(prev => prev
+      ? { ...prev, logs: [...(prev.logs || []), tempLog], total_calories: prev.total_calories + macros.calories, total_protein_g: prev.total_protein_g + macros.protein_g, total_carbs_g: prev.total_carbs_g + macros.carbs_g, total_fat_g: prev.total_fat_g + macros.fat_g }
+      : prev
+    )
+    closeModal()
+    toast.success('Food logged!')
     try {
-      const g = parseFloat(quantity)
-      const macros = calcMacros(selectedFood, g)
       await nutritionApi.create({ date, meal_type: mealType, food_name: selectedFood.name, quantity_g: g, ...macros })
-      await fetchNutrition(date)
-      closeModal()
-      toast.success('Food logged!')
+      fetchNutrition(date) // sync real data in background
     } catch {
-      toast.error('Failed to log food')
+      toast.error('Failed to save — please try again')
+      fetchNutrition(date) // revert
     } finally {
       setSaving(false)
     }
   }
 
   const handleLogManual = async () => {
-    if (!manualFood.name.trim() || !manualFood.calories) {
-      toast.error('Name and calories are required')
+    const cal100 = parseFloat(manualFood.cal100)
+    if (!manualFood.name.trim() || !cal100) {
+      toast.error('Name and calories per 100g are required')
       return
     }
+    const foodAsCommon: FoodSearchResult = {
+      id: 'manual',
+      name: manualFood.name,
+      calories_per_100g: cal100,
+      protein_per_100g: parseFloat(manualFood.pro100) || 0,
+      carbs_per_100g: parseFloat(manualFood.carb100) || 0,
+      fat_per_100g: parseFloat(manualFood.fat100) || 0,
+    }
+    const g = parseFloat(manualFood.quantity_g) || 100
+    const macros = calcMacros(foodAsCommon, g)
     setSaving(true)
+    // Optimistic update
+    const tempId = `temp_${Date.now()}`
+    const tempLog = { id: tempId, user_id: '', created_at: '', date, meal_type: mealType, food_name: manualFood.name, quantity_g: g, ...macros }
+    setSummary(prev => prev
+      ? { ...prev, logs: [...(prev.logs || []), tempLog], total_calories: prev.total_calories + macros.calories, total_protein_g: prev.total_protein_g + macros.protein_g, total_carbs_g: prev.total_carbs_g + macros.carbs_g, total_fat_g: prev.total_fat_g + macros.fat_g }
+      : prev
+    )
+    closeModal()
+    toast.success('Food logged!')
     try {
-      const qty = parseFloat(manualFood.quantity_g) || 100
-      await nutritionApi.create({
-        date,
-        meal_type: mealType,
-        food_name: manualFood.name,
-        quantity_g: qty,
-        calories: parseFloat(manualFood.calories) || 0,
-        protein_g: parseFloat(manualFood.protein_g) || 0,
-        carbs_g: parseFloat(manualFood.carbs_g) || 0,
-        fat_g: parseFloat(manualFood.fat_g) || 0,
-      })
-      await fetchNutrition(date)
-      closeModal()
-      toast.success('Food logged!')
+      await nutritionApi.create({ date, meal_type: mealType, food_name: manualFood.name, quantity_g: g, ...macros })
+      fetchNutrition(date)
     } catch {
-      toast.error('Failed to log food')
+      toast.error('Failed to save — please try again')
+      fetchNutrition(date)
     } finally {
       setSaving(false)
     }
@@ -623,59 +641,64 @@ export function NutritionPage() {
         )}
 
         {/* ── MANUAL MODE ── */}
-        {addMode === 'manual' && (
-          <div className="space-y-4">
-            <Input
-              label="Food Name"
-              placeholder="e.g. Chicken Breast"
-              value={manualFood.name}
-              onChange={e => setManualFood(f => ({ ...f, name: e.target.value }))}
-            />
-            <div className="grid grid-cols-2 gap-3">
+        {addMode === 'manual' && (() => {
+          const manualCal100 = parseFloat(manualFood.cal100) || 0
+          const manualPro100 = parseFloat(manualFood.pro100) || 0
+          const manualCarb100 = parseFloat(manualFood.carb100) || 0
+          const manualFat100 = parseFloat(manualFood.fat100) || 0
+          const manualGrams = parseFloat(manualFood.quantity_g) || 0
+          const ratio = manualGrams / 100
+          const preview = {
+            cal: Math.round(manualCal100 * ratio * 10) / 10,
+            pro: Math.round(manualPro100 * ratio * 10) / 10,
+            carb: Math.round(manualCarb100 * ratio * 10) / 10,
+            fat: Math.round(manualFat100 * ratio * 10) / 10,
+          }
+          return (
+            <div className="space-y-3">
               <Input
-                label="Calories (kcal) *"
-                type="number"
-                placeholder="250"
-                value={manualFood.calories}
-                onChange={e => setManualFood(f => ({ ...f, calories: e.target.value }))}
+                label="Food Name *"
+                placeholder="e.g. Homemade Omelette"
+                value={manualFood.name}
+                onChange={e => setManualFood(f => ({ ...f, name: e.target.value }))}
               />
-              <Input
-                label="Serving size (g)"
-                type="number"
-                placeholder="100"
-                value={manualFood.quantity_g}
-                onChange={e => setManualFood(f => ({ ...f, quantity_g: e.target.value }))}
-              />
+              <p className="text-xs font-medium text-text-secondary">Macros per 100g *</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Calories (kcal)" type="number" placeholder="155"
+                  value={manualFood.cal100} onChange={e => setManualFood(f => ({ ...f, cal100: e.target.value }))} />
+                <Input label="Protein (g)" type="number" placeholder="13"
+                  value={manualFood.pro100} onChange={e => setManualFood(f => ({ ...f, pro100: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Carbs (g)" type="number" placeholder="1.1"
+                  value={manualFood.carb100} onChange={e => setManualFood(f => ({ ...f, carb100: e.target.value }))} />
+                <Input label="Fat (g)" type="number" placeholder="11"
+                  value={manualFood.fat100} onChange={e => setManualFood(f => ({ ...f, fat100: e.target.value }))} />
+              </div>
+              <Input label="How much are you eating? (g)" type="number" placeholder="100"
+                value={manualFood.quantity_g} onChange={e => setManualFood(f => ({ ...f, quantity_g: e.target.value }))} />
+              {manualGrams > 0 && manualCal100 > 0 && (
+                <div className="grid grid-cols-4 gap-2 p-3 bg-bg-tertiary rounded-xl text-center">
+                  {[
+                    { label: 'Calories', val: preview.cal },
+                    { label: 'Protein', val: `${preview.pro}g` },
+                    { label: 'Carbs', val: `${preview.carb}g` },
+                    { label: 'Fat', val: `${preview.fat}g` },
+                  ].map(({ label, val }) => (
+                    <div key={label}>
+                      <div className="text-sm font-bold text-text-primary">{val}</div>
+                      <div className="text-xs text-text-muted">{label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button fullWidth loading={saving} onClick={handleLogManual}
+                disabled={!manualFood.name.trim() || !manualFood.cal100 || !manualFood.quantity_g}>
+                Log Food
+              </Button>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <Input
-                label="Protein (g)"
-                type="number"
-                placeholder="30"
-                value={manualFood.protein_g}
-                onChange={e => setManualFood(f => ({ ...f, protein_g: e.target.value }))}
-              />
-              <Input
-                label="Carbs (g)"
-                type="number"
-                placeholder="0"
-                value={manualFood.carbs_g}
-                onChange={e => setManualFood(f => ({ ...f, carbs_g: e.target.value }))}
-              />
-              <Input
-                label="Fat (g)"
-                type="number"
-                placeholder="5"
-                value={manualFood.fat_g}
-                onChange={e => setManualFood(f => ({ ...f, fat_g: e.target.value }))}
-              />
-            </div>
-            <p className="text-xs text-text-muted">Enter the total for your serving size above, not per 100g.</p>
-            <Button fullWidth loading={saving} onClick={handleLogManual} disabled={!manualFood.name.trim() || !manualFood.calories}>
-              Log Food
-            </Button>
-          </div>
-        )}
+          )
+        })()}
       </Modal>
     </div>
   )

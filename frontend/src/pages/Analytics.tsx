@@ -29,6 +29,44 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 }
 
 type AnalyticsTab = 'strength' | 'body' | 'nutrition'
+type CalPeriod = '4w' | '3m' | '6m' | '1y'
+
+const CAL_PERIODS: { id: CalPeriod; label: string; days: number }[] = [
+  { id: '4w',  label: '4 Weeks', days: 28  },
+  { id: '3m',  label: '3 Months', days: 90  },
+  { id: '6m',  label: '6 Months', days: 180 },
+  { id: '1y',  label: '1 Year',   days: 365 },
+]
+
+function groupByWeek(data: any[]): any[] {
+  const byWeek: Record<string, { calories: number; count: number; target: number | null }> = {}
+  for (const d of data) {
+    const dt = new Date(d.date)
+    // ISO week key: year-Wxx
+    const monday = new Date(dt)
+    monday.setDate(dt.getDate() - ((dt.getDay() + 6) % 7))
+    const key = monday.toISOString().slice(0, 10)
+    if (!byWeek[key]) byWeek[key] = { calories: 0, count: 0, target: d.target }
+    byWeek[key].calories += d.calories
+    byWeek[key].count += 1
+  }
+  return Object.entries(byWeek)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date: date.slice(5), calories: Math.round(v.calories), target: v.target }))
+}
+
+function groupByMonth(data: any[]): any[] {
+  const byMonth: Record<string, { calories: number; count: number; target: number | null }> = {}
+  for (const d of data) {
+    const key = d.date.slice(0, 7) // YYYY-MM
+    if (!byMonth[key]) byMonth[key] = { calories: 0, count: 0, target: d.target }
+    byMonth[key].calories += d.calories
+    byMonth[key].count += 1
+  }
+  return Object.entries(byMonth)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date: date.slice(5), calories: Math.round(v.calories), target: v.target ? v.target * v.count : null }))
+}
 
 const defaultMeasurement = {
   date: new Date().toISOString().split('T')[0],
@@ -47,6 +85,8 @@ export function AnalyticsPage() {
   const { user } = useAuthStore()
   const toast = useToast()
   const [tab, setTab] = useState<AnalyticsTab>('strength')
+  const [calPeriod, setCalPeriod] = useState<CalPeriod>('4w')
+  const [strengthWeeks, setStrengthWeeks] = useState(12)
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [selectedEx, setSelectedEx] = useState('')
   const [strengthData, setStrengthData] = useState<any[]>([])
@@ -67,15 +107,14 @@ export function AnalyticsPage() {
       setExercises(filtered)
       if (filtered.length) setSelectedEx(filtered[0].id)
     })
-    api.get('/progress/calories', { params: { days: 30 } }).then(r => setCalorieData(r.data)).catch(() => {})
+    api.get('/progress/calories', { params: { days: 365 } }).then(r => setCalorieData(r.data)).catch(() => {})
     api.get('/progress/macros', { params: { days: 7 } }).then(r => setMacroData(r.data)).catch(() => {})
     setLoading(false)
   }, [])
 
   useEffect(() => {
     if (tab === 'body') {
-      // Use measurements endpoint for full data including id (needed for delete)
-      api.get('/measurements', { params: { days: 90 } }).then(r => {
+      api.get('/measurements', { params: { days: 365 } }).then(r => {
         setBodyData(r.data)
         setMeasurements(r.data)
       }).catch(() => {})
@@ -86,13 +125,13 @@ export function AnalyticsPage() {
   useEffect(() => {
     if (!selectedEx) return
     Promise.all([
-      api.get('/progress/strength', { params: { exercise_id: selectedEx, weeks: 12 } }).then(r => r.data).catch(() => []),
-      api.get('/progress/volume', { params: { exercise_id: selectedEx, weeks: 8 } }).then(r => r.data).catch(() => []),
+      api.get('/progress/strength', { params: { exercise_id: selectedEx, weeks: strengthWeeks } }).then(r => r.data).catch(() => []),
+      api.get('/progress/volume', { params: { exercise_id: selectedEx, weeks: strengthWeeks } }).then(r => r.data).catch(() => []),
     ]).then(([s, v]) => {
       setStrengthData(s)
       setVolumeData(v)
     })
-  }, [selectedEx])
+  }, [selectedEx, strengthWeeks])
 
   const logMeasurement = async () => {
     setSavingMeasure(true)
@@ -191,14 +230,20 @@ export function AnalyticsPage() {
 
               <motion.div variants={item}>
                 <Card padding="md">
-                  <div className="flex items-center justify-between mb-4 gap-2">
+                  <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                     <h3 className="font-semibold text-text-primary">Estimated 1RM</h3>
-                    <div className="w-40">
-                      <Select
-                        value={selectedEx}
-                        onChange={e => setSelectedEx(e.target.value)}
-                        options={exerciseOptions}
-                      />
+                    <div className="flex gap-1.5 items-center">
+                      <div className="flex gap-1 p-0.5 bg-bg-tertiary rounded-lg">
+                        {[{ w: 12, l: '3M' }, { w: 26, l: '6M' }, { w: 52, l: '1Y' }, { w: 104, l: 'All' }].map(({ w, l }) => (
+                          <button key={w} onClick={() => setStrengthWeeks(w)}
+                            className={`px-2 py-0.5 rounded text-xs font-medium transition-all ${strengthWeeks === w ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}>
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="w-36">
+                        <Select value={selectedEx} onChange={e => setSelectedEx(e.target.value)} options={exerciseOptions} />
+                      </div>
                     </div>
                   </div>
                   {strengthData.length ? (
@@ -387,27 +432,48 @@ export function AnalyticsPage() {
 
               <motion.div variants={item}>
                 <Card padding="md">
-                  <h3 className="font-semibold text-text-primary mb-4">Calorie Adherence (30 days)</h3>
-                  {calorieData.length ? (
-                    <ResponsiveContainer width="100%" height={160}>
-                      <BarChart data={calorieData.slice(-14)} margin={{ top: 0, right: 0, left: -25, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false} />
-                        <XAxis dataKey="date" tickFormatter={d => d.slice(5)} tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-                        {user?.calorie_target && (
-                          <ReferenceLine y={user.calorie_target} stroke="#7c3aed" strokeDasharray="4 4"
-                            label={{ value: 'Target', fill: '#a78bfa', fontSize: 10 }} />
-                        )}
-                        <Bar dataKey="calories" fill="#dc2626" radius={[4, 4, 0, 0]} name="Calories" isAnimationActive={true} animationDuration={800} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-40 flex flex-col items-center justify-center text-text-muted text-sm gap-2">
-                      <span className="text-3xl">📊</span>
-                      <span>Log nutrition to see calorie data</span>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-text-primary">Calorie Intake</h3>
+                    <div className="flex gap-1 p-0.5 bg-bg-tertiary rounded-lg">
+                      {CAL_PERIODS.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => setCalPeriod(p.id)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${calPeriod === p.id ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
                     </div>
-                  )}
+                  </div>
+                  {(() => {
+                    const period = CAL_PERIODS.find(p => p.id === calPeriod)!
+                    const cutoff = new Date()
+                    cutoff.setDate(cutoff.getDate() - period.days)
+                    const filtered = calorieData.filter(d => new Date(d.date) >= cutoff)
+                    const chartData = period.days <= 30 ? filtered : period.days <= 90 ? groupByWeek(filtered) : groupByMonth(filtered)
+                    const targetLine = period.days <= 90 ? user?.calorie_target : null // target line only meaningful per-day/week
+                    return calorieData.length ? (
+                      <ResponsiveContainer width="100%" height={160}>
+                        <BarChart data={chartData} margin={{ top: 0, right: 0, left: -25, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false} />
+                          <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
+                          <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                          {targetLine && (
+                            <ReferenceLine y={targetLine} stroke="#7c3aed" strokeDasharray="4 4"
+                              label={{ value: 'Target', fill: '#a78bfa', fontSize: 10 }} />
+                          )}
+                          <Bar dataKey="calories" fill="#dc2626" radius={[4, 4, 0, 0]} name="Calories" isAnimationActive={true} animationDuration={800} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-40 flex flex-col items-center justify-center text-text-muted text-sm gap-2">
+                        <span className="text-3xl">📊</span>
+                        <span>Log nutrition to see calorie data</span>
+                      </div>
+                    )
+                  })()}
                 </Card>
               </motion.div>
 
