@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, CheckCircle2, Trash2, ChevronDown, ChevronUp, Zap, Sparkles } from 'lucide-react'
+import { Plus, CheckCircle2, Trash2, ChevronDown, ChevronUp, Zap, Sparkles, Search } from 'lucide-react'
 import { splitsApi } from '../services/splits'
 import { exercisesApi } from '../services/exercises'
 import { useToast } from '../stores/uiStore'
@@ -127,6 +127,8 @@ export function SplitsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingTemplate, setSavingTemplate] = useState<string | null>(null)
+  const [exSearch, setExSearch] = useState('')
+  const [exMuscleFilter, setExMuscleFilter] = useState<string>('All')
   const toast = useToast()
 
   // Custom form state
@@ -139,8 +141,8 @@ export function SplitsPage() {
 
   useEffect(() => {
     Promise.all([
-      splitsApi.list().then(setSplits),
-      exercisesApi.list().then(setExercises),
+      splitsApi.list().then(setSplits).catch(() => {}),
+      exercisesApi.list().then(setExercises).catch(() => {}),
     ]).finally(() => setLoading(false))
   }, [])
 
@@ -429,20 +431,48 @@ export function SplitsPage() {
                       </button>
                     )}
                   </div>
-                  <p className="text-xs text-text-muted mb-1.5">Tap to add exercises:</p>
-                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto mb-2">
-                    {exercises.filter(e => e.muscle_group !== 'CARDIO').map(ex => {
-                      const selected = day.exercises.find(e => e.exercise_id === ex.id)
-                      return (
-                        <button
-                          key={ex.id}
-                          onClick={() => toggleExercise(dayIdx, ex.id)}
-                          className={`px-2 py-1 rounded-lg text-xs transition-colors ${selected ? 'bg-primary-700 text-white' : 'bg-bg-secondary text-text-secondary hover:bg-bg-hover'}`}
-                        >
-                          {ex.name}
-                        </button>
-                      )
-                    })}
+                  <p className="text-xs text-text-muted mb-1.5">Select exercises:</p>
+                  <div className="mb-2">
+                    {/* Search & muscle filter */}
+                    <div className="flex gap-1.5 mb-1.5">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted pointer-events-none" />
+                        <input
+                          placeholder="Search exercises..."
+                          value={exSearch}
+                          onChange={e => setExSearch(e.target.value)}
+                          className="w-full pl-6 pr-2 py-1.5 bg-bg-secondary border border-border rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary-700/50"
+                        />
+                      </div>
+                      <select
+                        value={exMuscleFilter}
+                        onChange={e => setExMuscleFilter(e.target.value)}
+                        className="bg-bg-secondary border border-border rounded-lg text-xs text-text-secondary px-2 py-1.5 focus:outline-none"
+                      >
+                        <option value="All">All</option>
+                        {[...new Set(exercises.filter(e => e.muscle_group !== 'CARDIO').map(e => e.muscle_group))].sort().map(mg => (
+                          <option key={mg} value={mg}>{mg}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                      {exercises
+                        .filter(e => e.muscle_group !== 'CARDIO')
+                        .filter(e => exMuscleFilter === 'All' || e.muscle_group === exMuscleFilter)
+                        .filter(e => !exSearch || e.name.toLowerCase().includes(exSearch.toLowerCase()))
+                        .map(ex => {
+                          const selected = day.exercises.find(e => e.exercise_id === ex.id)
+                          return (
+                            <button
+                              key={ex.id}
+                              onClick={() => toggleExercise(dayIdx, ex.id)}
+                              className={`px-2 py-1 rounded-lg text-xs transition-colors ${selected ? 'bg-primary-700 text-white' : 'bg-bg-secondary text-text-secondary hover:bg-bg-hover'}`}
+                            >
+                              {ex.name}
+                            </button>
+                          )
+                        })}
+                    </div>
                   </div>
                   {day.exercises.length > 0 && (
                     <div className="space-y-1.5 mt-2 pt-2 border-t border-border">

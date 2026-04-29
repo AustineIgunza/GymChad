@@ -190,6 +190,8 @@ export function NutritionPage() {
   const [loading, setLoading] = useState(true)
   const [addModal, setAddModal] = useState(false)
   const [addMode, setAddMode] = useState<AddMode>('common')
+  const [foodCategory, setFoodCategory] = useState<FoodCategory>('All')
+  const [commonSearch, setCommonSearch] = useState('')
   const [searchQ, setSearchQ] = useState('')
   const [searchResults, setSearchResults] = useState<FoodSearchResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -305,6 +307,8 @@ export function NutritionPage() {
     setSearchResults([])
     setManualFood(defaultManual)
     setAddMode('common')
+    setCommonSearch('')
+    setFoodCategory('All')
   }
 
   const groupedLogs = MEAL_TYPES.reduce((acc, m) => {
@@ -486,19 +490,47 @@ export function NutritionPage() {
         {/* ── COMMON FOODS MODE ── */}
         {addMode === 'common' && (
           !selectedFood ? (
-            <div className="space-y-2 max-h-72 overflow-y-auto">
-              {COMMON_FOODS.map((food) => (
-                <button
-                  key={food.id}
-                  onClick={() => setSelectedFood(food)}
-                  className="w-full text-left p-3 rounded-xl bg-bg-tertiary hover:bg-bg-hover transition-colors border border-border"
-                >
-                  <p className="text-sm font-medium text-text-primary leading-tight">{food.name}</p>
-                  <p className="text-xs text-text-muted mt-0.5">
-                    {food.calories_per_100g} kcal · {food.protein_per_100g}g P · {food.carbs_per_100g}g C · {food.fat_per_100g}g F per 100g
-                  </p>
-                </button>
-              ))}
+            <div>
+              {/* Search within common foods */}
+              <div className="relative mb-3">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none" />
+                <input
+                  placeholder="Filter foods..."
+                  value={commonSearch}
+                  onChange={e => setCommonSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 bg-bg-tertiary border border-border rounded-xl text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary-700/50"
+                />
+              </div>
+              {/* Category tabs */}
+              <div className="flex gap-1.5 overflow-x-auto pb-2 mb-3 scrollbar-hide">
+                {FOOD_CATEGORIES.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setFoodCategory(cat)}
+                    className={`flex-shrink-0 px-3 py-1 rounded-lg text-xs font-medium transition-colors ${foodCategory === cat ? 'bg-primary-700 text-white' : 'bg-bg-tertiary text-text-muted hover:bg-bg-hover'}`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              {/* Food list */}
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                {COMMON_FOODS
+                  .filter(f => foodCategory === 'All' || f.category === foodCategory)
+                  .filter(f => !commonSearch || f.name.toLowerCase().includes(commonSearch.toLowerCase()))
+                  .map((food) => (
+                    <button
+                      key={food.id}
+                      onClick={() => setSelectedFood(food)}
+                      className="w-full text-left p-3 rounded-xl bg-bg-tertiary hover:bg-bg-hover transition-colors border border-border"
+                    >
+                      <p className="text-sm font-medium text-text-primary leading-tight">{food.name}</p>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        {food.calories_per_100g} kcal · {food.protein_per_100g}g P · {food.carbs_per_100g}g C · {food.fat_per_100g}g F per 100g
+                      </p>
+                    </button>
+                  ))}
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
