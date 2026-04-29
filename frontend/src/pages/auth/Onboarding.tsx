@@ -25,7 +25,7 @@ export function Onboarding() {
     activity_level: 'moderate' as ActivityLevel,
   })
   const [loading, setLoading] = useState(false)
-  const { initialize } = useAuthStore()
+  const { refreshUser } = useAuthStore()
   const navigate = useNavigate()
   const toast = useToast()
 
@@ -39,13 +39,13 @@ export function Onboarding() {
   const submit = async () => {
     setLoading(true)
     try {
-      await api.put('/auth/onboarding', {
+      const { data } = await api.put('/auth/onboarding', {
         ...form,
         weight_kg: parseFloat(form.weight_kg),
         height_cm: parseFloat(form.height_cm),
         age: parseInt(form.age),
       })
-      await initialize()
+      useAuthStore.getState().setUser(data)
       navigate('/')
       toast.success('Welcome to GymChad! 💪')
     } catch (err: any) {

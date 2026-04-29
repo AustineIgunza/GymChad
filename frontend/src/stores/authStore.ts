@@ -8,6 +8,7 @@ interface AuthState {
   user: User | null
   loading: boolean
   initialized: boolean
+  _authSubscription: (() => void) | null
   setUser: (user: User | null) => void
   initialize: () => Promise<void>
   logout: () => Promise<void>
@@ -34,6 +35,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       loading: false,
       initialized: false,
+      _authSubscription: null,
 
       setUser: (user) => set({ user }),
 
@@ -58,8 +60,11 @@ export const useAuthStore = create<AuthState>()(
           set({ loading: false, initialized: true })
         }
 
-        // Listen for future sign-in / sign-out events (e.g. after OAuth redirect)
-        supabase.auth.onAuthStateChange(async (event, session) => {
+        // Unsubscribe previous listener before registering a new one
+        const prev = useAuthStore.getState()._authSubscription
+        if (prev) prev()
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
           if (event === 'SIGNED_IN' && session?.user) {
             const user = await verifyWithBackend(session.user)
             set({ user, initialized: true })
@@ -67,6 +72,7 @@ export const useAuthStore = create<AuthState>()(
             set({ user: null, initialized: true })
           }
         })
+        set({ _authSubscription: () => subscription.unsubscribe() })
       },
 
       refreshUser: async () => {
@@ -85,7 +91,7 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'gymchad-auth',
-      partialize: (state) => ({ user: state.user }),
+      partialize: (state) => ({ user: state.user, _authSubscription: undefined }),
     }
   )
 )
