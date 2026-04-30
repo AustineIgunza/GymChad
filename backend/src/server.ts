@@ -130,10 +130,10 @@ app.use("/api/v1", rateLimit({ windowMs: 15 * 60 * 1000, max: 150 }));
 app.use("/api/v1", async (req, _res, next) => {
   try {
     const supabaseId =
-      extractSubFromJwt(req.headers.authorization) ??
-      String(req.headers["x-user-id"] ?? "demo-user")
-        .replace(/[^a-zA-Z0-9_-]/g, "")
-        .slice(0, 64) ||
+      (extractSubFromJwt(req.headers.authorization) ??
+        String(req.headers["x-user-id"] ?? "demo-user")
+          .replace(/[^a-zA-Z0-9_-]/g, "")
+          .slice(0, 64)) ||
       "demo-user";
     const user = await prisma.user.upsert({
       where: { supabaseId },
