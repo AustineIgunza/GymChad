@@ -33,8 +33,13 @@ export function Register() {
       if (error) throw error
 
       if (data.session) {
-        // Create user record in our DB, then go to onboarding
         await initialize()
+        const { user } = useAuthStore.getState()
+        if (!user) {
+          toast.error('Account created but could not reach the server. Please try logging in.')
+          navigate('/login')
+          return
+        }
         navigate('/onboarding')
       } else {
         toast.info('Check your email to confirm your account')

@@ -2,7 +2,9 @@ import axios from 'axios'
 import { supabase } from './supabase'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api/v1',
+  // In production (Vercel) /api/* is proxied to Railway via vercel.json rewrites.
+  // Locally, set VITE_API_URL=http://localhost:8000/api/v1 in frontend/.env
+  baseURL: import.meta.env.VITE_API_URL ?? '/api/v1',
   timeout: 15000, // 15s — prevents indefinite hangs if Railway/Supabase is slow
 })
 

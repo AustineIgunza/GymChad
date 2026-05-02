@@ -23,6 +23,12 @@ export function Login() {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
       await initialize()
+      // Check if the backend successfully verified and returned a user
+      const { user } = useAuthStore.getState()
+      if (!user) {
+        toast.error('Signed in but could not reach the server. Check your connection and try again.')
+        return
+      }
       navigate('/')
     } catch (err: any) {
       toast.error(err.message || 'Login failed')
