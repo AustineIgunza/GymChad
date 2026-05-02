@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api/v1',
+  timeout: 15000, // 15s — prevents indefinite hangs if Railway/Supabase is slow
 })
 
 // Cached token — avoids calling async getSession() on every request

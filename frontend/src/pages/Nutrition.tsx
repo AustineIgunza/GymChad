@@ -164,15 +164,23 @@ const COMMON_FOODS: CommonFood[] = [
 const FOOD_CATEGORIES: FoodCategory[] = ['All', 'Protein', 'Carbs', 'Dairy', 'Vegetables', 'Fruits', 'Fats', 'Legumes', 'Supplements']
 
 type AddMode = 'common' | 'search' | 'manual'
+type ServingUnit = 'g' | 'ml' | 'oz' | 'piece' | 'cup' | 'tbsp' | 'tsp'
 
-// Manual entry stores per-100g values + quantity, same pattern as common foods
+const UNIT_LABELS: Record<ServingUnit, string> = {
+  g: 'g', ml: 'ml', oz: 'oz', piece: 'piece', cup: 'cup', tbsp: 'tbsp', tsp: 'tsp',
+}
+const UNIT_TO_GRAMS: Partial<Record<ServingUnit, number>> = {
+  g: 1, ml: 1, oz: 28.35, cup: 240, tbsp: 15, tsp: 5,
+}
+
+// Manual entry stores per-100g values + amount/unit
 interface ManualFood {
   name: string
   cal100: string   // calories per 100g
   pro100: string   // protein per 100g
   carb100: string  // carbs per 100g
   fat100: string   // fat per 100g
-  quantity_g: string
+  quantity: string // amount in the selected unit
 }
 
 const defaultManual: ManualFood = {
@@ -181,7 +189,80 @@ const defaultManual: ManualFood = {
   pro100: '',
   carb100: '',
   fat100: '',
-  quantity_g: '100',
+  quantity: '1',
+}
+
+interface ServingInputProps {
+  quantity: string
+  setQuantity: (v: string) => void
+  servingUnit: ServingUnit
+  setServingUnit: (u: ServingUnit) => void
+  gramsPerPiece: string
+  setGramsPerPiece: (v: string) => void
+}
+
+function ServingInput({ quantity, setQuantity, servingUnit, setServingUnit, gramsPerPiece, setGramsPerPiece }: ServingInputProps) {
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-xs font-medium text-text-secondary block mb-1">Amount</label>
+          <input
+            type="number"
+            value={quantity}
+            onChange={e => setQuantity(e.target.value)}
+            min="0.1"
+            step="0.1"
+            className="w-full px-3 py-2 bg-bg-tertiary border border-border rounded-xl text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary-700/50"
+            placeholder="1"
+          />
+        </div>
+        <div className="w-28">
+          <label className="text-xs font-medium text-text-secondary block mb-1">Unit</label>
+          <select
+            value={servingUnit}
+            onChange={e => setServingUnit(e.target.value as ServingUnit)}
+            className="w-full px-3 py-2 bg-bg-tertiary border border-border rounded-xl text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-700/50"
+          >
+            {(Object.keys(UNIT_LABELS) as ServingUnit[]).map(u => (
+              <option key={u} value={u}>{UNIT_LABELS[u]}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {servingUnit === 'piece' && (
+        <div>
+          <label className="text-xs font-medium text-text-secondary block mb-1">Grams per piece</label>
+          <input
+            type="number"
+            value={gramsPerPiece}
+            onChange={e => setGramsPerPiece(e.target.value)}
+            min="1"
+            className="w-full px-3 py-2 bg-bg-tertiary border border-border rounded-xl text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-700/50"
+            placeholder="e.g. 120"
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MacroPreview({ macros }: { macros: { calories: number; protein_g: number; carbs_g: number; fat_g: number } }) {
+  return (
+    <div className="grid grid-cols-4 gap-2 p-3 bg-bg-tertiary rounded-xl text-center">
+      {[
+        { label: 'Calories', val: macros.calories },
+        { label: 'Protein', val: `${macros.protein_g}g` },
+        { label: 'Carbs', val: `${macros.carbs_g}g` },
+        { label: 'Fat', val: `${macros.fat_g}g` },
+      ].map(({ label, val }) => (
+        <div key={label}>
+          <div className="text-sm font-bold text-text-primary">{val}</div>
+          <div className="text-xs text-text-muted">{label}</div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export function NutritionPage() {
@@ -201,6 +282,8 @@ export function NutritionPage() {
   const [mealType, setMealType] = useState<MealType>('BREAKFAST')
   const [saving, setSaving] = useState(false)
   const [manualFood, setManualFood] = useState<ManualFood>(defaultManual)
+  const [servingUnit, setServingUnit] = useState<ServingUnit>('g')
+  const [gramsPerPiece, setGramsPerPiece] = useState('100')
   const toast = useToast()
 
   const fetchNutrition = async (d: string) => {
@@ -213,6 +296,20 @@ export function NutritionPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Silent background refresh — no loading spinner, used after logging food
+  const refreshNutrition = async (d: string) => {
+    try {
+      const data = await nutritionApi.getDay(d)
+      setSummary(data)
+    } catch { /* ignore — stale data is fine */ }
+  }
+
+  // Convert amount + unit to grams
+  const toGrams = (amount: number, unit: ServingUnit, gpp: number): number => {
+    if (unit === 'piece') return amount * gpp
+    return amount * (UNIT_TO_GRAMS[unit] ?? 1)
   }
 
   useEffect(() => { fetchNutrition(date) }, [date])
@@ -249,23 +346,15 @@ export function NutritionPage() {
   const handleLog = async () => {
     if (!selectedFood) return
     setSaving(true)
-    const g = parseFloat(quantity) || 100
+    const g = toGrams(parseFloat(quantity) || 1, servingUnit, parseFloat(gramsPerPiece) || 100)
     const macros = calcMacros(selectedFood, g)
-    // Optimistic update — add to summary immediately, then sync in background
-    const tempId = `temp_${Date.now()}`
-    const tempLog = { id: tempId, user_id: '', created_at: '', date, meal_type: mealType, food_name: selectedFood.name, quantity_g: g, ...macros }
-    setSummary(prev => prev
-      ? { ...prev, logs: [...(prev.logs || []), tempLog], total_calories: prev.total_calories + macros.calories, total_protein_g: prev.total_protein_g + macros.protein_g, total_carbs_g: prev.total_carbs_g + macros.carbs_g, total_fat_g: prev.total_fat_g + macros.fat_g }
-      : prev
-    )
-    closeModal()
-    toast.success('Food logged!')
     try {
       await nutritionApi.create({ date, meal_type: mealType, food_name: selectedFood.name, quantity_g: g, ...macros })
-      fetchNutrition(date) // sync real data in background
+      closeModal()
+      toast.success('Food logged!')
+      refreshNutrition(date)
     } catch {
       toast.error('Failed to save — please try again')
-      fetchNutrition(date) // revert
     } finally {
       setSaving(false)
     }
@@ -285,24 +374,16 @@ export function NutritionPage() {
       carbs_per_100g: parseFloat(manualFood.carb100) || 0,
       fat_per_100g: parseFloat(manualFood.fat100) || 0,
     }
-    const g = parseFloat(manualFood.quantity_g) || 100
+    const g = toGrams(parseFloat(manualFood.quantity) || 1, servingUnit, parseFloat(gramsPerPiece) || 100)
     const macros = calcMacros(foodAsCommon, g)
     setSaving(true)
-    // Optimistic update
-    const tempId = `temp_${Date.now()}`
-    const tempLog = { id: tempId, user_id: '', created_at: '', date, meal_type: mealType, food_name: manualFood.name, quantity_g: g, ...macros }
-    setSummary(prev => prev
-      ? { ...prev, logs: [...(prev.logs || []), tempLog], total_calories: prev.total_calories + macros.calories, total_protein_g: prev.total_protein_g + macros.protein_g, total_carbs_g: prev.total_carbs_g + macros.carbs_g, total_fat_g: prev.total_fat_g + macros.fat_g }
-      : prev
-    )
-    closeModal()
-    toast.success('Food logged!')
     try {
       await nutritionApi.create({ date, meal_type: mealType, food_name: manualFood.name, quantity_g: g, ...macros })
-      fetchNutrition(date)
+      closeModal()
+      toast.success('Food logged!')
+      refreshNutrition(date)
     } catch {
       toast.error('Failed to save — please try again')
-      fetchNutrition(date)
     } finally {
       setSaving(false)
     }
@@ -327,6 +408,9 @@ export function NutritionPage() {
     setAddMode('common')
     setCommonSearch('')
     setFoodCategory('All')
+    setServingUnit('g')
+    setGramsPerPiece('100')
+    setQuantity('100')
   }
 
   const groupedLogs = MEAL_TYPES.reduce((acc, m) => {
@@ -336,7 +420,7 @@ export function NutritionPage() {
 
   const macros = calcMacros(
     selectedFood || { calories_per_100g: 0, protein_per_100g: 0, carbs_per_100g: 0, fat_per_100g: 0 } as any,
-    parseFloat(quantity) || 100
+    toGrams(parseFloat(quantity) || 0, servingUnit, parseFloat(gramsPerPiece) || 100)
   )
 
   return (
@@ -419,7 +503,7 @@ export function NutritionPage() {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-text-primary truncate">{log.food_name}</p>
-                      <p className="text-xs text-text-muted">{log.quantity_g}g · {Math.round(log.protein_g)}g P · {Math.round(log.carbs_g)}g C · {Math.round(log.fat_g)}g F</p>
+                      <p className="text-xs text-text-muted">{log.quantity_g % 1 === 0 ? log.quantity_g : log.quantity_g.toFixed(1)}g · {Math.round(log.protein_g)}g P · {Math.round(log.carbs_g)}g C · {Math.round(log.fat_g)}g F</p>
                     </div>
                     <div className="flex items-center gap-2 ml-3">
                       <span className="text-sm font-semibold text-text-secondary">{Math.round(log.calories)}</span>
@@ -558,20 +642,8 @@ export function NutritionPage() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <Input label="Quantity (g)" type="number" value={quantity} onChange={e => setQuantity(e.target.value)} />
-              <div className="grid grid-cols-4 gap-2 p-3 bg-bg-tertiary rounded-xl text-center">
-                {[
-                  { label: 'Calories', val: macros.calories },
-                  { label: 'Protein', val: `${macros.protein_g}g` },
-                  { label: 'Carbs', val: `${macros.carbs_g}g` },
-                  { label: 'Fat', val: `${macros.fat_g}g` },
-                ].map(({ label, val }) => (
-                  <div key={label}>
-                    <div className="text-sm font-bold text-text-primary">{val}</div>
-                    <div className="text-xs text-text-muted">{label}</div>
-                  </div>
-                ))}
-              </div>
+              <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
+              <MacroPreview macros={macros} />
               <Button fullWidth loading={saving} onClick={handleLog}>Log Food</Button>
             </div>
           )
@@ -619,21 +691,8 @@ export function NutritionPage() {
                 </button>
               </div>
 
-              <Input label="Quantity (g)" type="number" value={quantity} onChange={e => setQuantity(e.target.value)} />
-
-              <div className="grid grid-cols-4 gap-2 p-3 bg-bg-tertiary rounded-xl text-center">
-                {[
-                  { label: 'Calories', val: macros.calories },
-                  { label: 'Protein', val: `${macros.protein_g}g` },
-                  { label: 'Carbs', val: `${macros.carbs_g}g` },
-                  { label: 'Fat', val: `${macros.fat_g}g` },
-                ].map(({ label, val }) => (
-                  <div key={label}>
-                    <div className="text-sm font-bold text-text-primary">{val}</div>
-                    <div className="text-xs text-text-muted">{label}</div>
-                  </div>
-                ))}
-              </div>
+              <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
+              <MacroPreview macros={macros} />
 
               <Button fullWidth loading={saving} onClick={handleLog}>Log Food</Button>
             </div>
@@ -646,7 +705,7 @@ export function NutritionPage() {
           const manualPro100 = parseFloat(manualFood.pro100) || 0
           const manualCarb100 = parseFloat(manualFood.carb100) || 0
           const manualFat100 = parseFloat(manualFood.fat100) || 0
-          const manualGrams = parseFloat(manualFood.quantity_g) || 0
+          const manualGrams = toGrams(parseFloat(manualFood.quantity) || 0, servingUnit, parseFloat(gramsPerPiece) || 100)
           const ratio = manualGrams / 100
           const preview = {
             cal: Math.round(manualCal100 * ratio * 10) / 10,
@@ -675,25 +734,20 @@ export function NutritionPage() {
                 <Input label="Fat (g)" type="number" placeholder="11"
                   value={manualFood.fat100} onChange={e => setManualFood(f => ({ ...f, fat100: e.target.value }))} />
               </div>
-              <Input label="How much are you eating? (g)" type="number" placeholder="100"
-                value={manualFood.quantity_g} onChange={e => setManualFood(f => ({ ...f, quantity_g: e.target.value }))} />
+              <p className="text-xs font-medium text-text-secondary">How much are you eating?</p>
+              <ServingInput
+                quantity={manualFood.quantity}
+                setQuantity={v => setManualFood(f => ({ ...f, quantity: v }))}
+                servingUnit={servingUnit}
+                setServingUnit={setServingUnit}
+                gramsPerPiece={gramsPerPiece}
+                setGramsPerPiece={setGramsPerPiece}
+              />
               {manualGrams > 0 && manualCal100 > 0 && (
-                <div className="grid grid-cols-4 gap-2 p-3 bg-bg-tertiary rounded-xl text-center">
-                  {[
-                    { label: 'Calories', val: preview.cal },
-                    { label: 'Protein', val: `${preview.pro}g` },
-                    { label: 'Carbs', val: `${preview.carb}g` },
-                    { label: 'Fat', val: `${preview.fat}g` },
-                  ].map(({ label, val }) => (
-                    <div key={label}>
-                      <div className="text-sm font-bold text-text-primary">{val}</div>
-                      <div className="text-xs text-text-muted">{label}</div>
-                    </div>
-                  ))}
-                </div>
+                <MacroPreview macros={{ calories: preview.cal, protein_g: preview.pro, carbs_g: preview.carb, fat_g: preview.fat }} />
               )}
               <Button fullWidth loading={saving} onClick={handleLogManual}
-                disabled={!manualFood.name.trim() || !manualFood.cal100 || !manualFood.quantity_g}>
+                disabled={!manualFood.name.trim() || !manualFood.cal100 || !manualFood.quantity}>
                 Log Food
               </Button>
             </div>

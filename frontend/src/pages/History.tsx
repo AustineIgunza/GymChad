@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Calendar, ChevronDown, ChevronUp, Dumbbell } from 'lucide-react'
+import { Calendar, ChevronDown, ChevronUp, Dumbbell, BarChart2 } from 'lucide-react'
 import { workoutsApi } from '../services/workouts'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -13,12 +13,50 @@ const MUSCLE_COLORS: Record<string, string> = {
   GLUTES: '#ec4899', CORE: '#06b6d4', CARDIO: '#84cc16', FULL_BODY: '#8b5cf6',
 }
 
+type ViewMode = 'days' | 'months' | 'years'
+
+interface AggregateGroup {
+  label: string
+  count: number
+  totalSets: number
+  totalVolume: number
+  muscles: string[]
+}
+
+function aggregateWorkouts(workouts: Workout[], mode: 'months' | 'years'): AggregateGroup[] {
+  const groups: Record<string, { workouts: Workout[]; label: string }> = {}
+
+  for (const w of workouts) {
+    const d = new Date(w.date)
+    const key = mode === 'months'
+      ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      : `${d.getFullYear()}`
+    const label = mode === 'months'
+      ? d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+      : `${d.getFullYear()}`
+
+    if (!groups[key]) groups[key] = { workouts: [], label }
+    groups[key].workouts.push(w)
+  }
+
+  return Object.entries(groups)
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([, { label, workouts: ws }]) => {
+      const allSets = ws.flatMap(w => w.sets || [])
+      const workingSets = allSets.filter(s => !s.is_warmup)
+      const totalVolume = workingSets.reduce((a, s) => a + s.reps * s.weight_kg, 0)
+      const muscles = [...new Set(allSets.map(s => s.exercise?.muscle_group).filter(Boolean) as string[])]
+      return { label, count: ws.length, totalSets: workingSets.length, totalVolume, muscles }
+    })
+}
+
 export function HistoryPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
+  const [viewMode, setViewMode] = useState<ViewMode>('days')
 
   const fetchPage = async (p: number, append = false) => {
     setLoading(true)
@@ -34,7 +72,32 @@ export function HistoryPage() {
     }
   }
 
+  // Load more data for aggregate views
+  const fetchAll = async () => {
+    setLoading(true)
+    try {
+      const all: Workout[] = []
+      for (let p = 1; p <= 10; p++) {
+        const data = await workoutsApi.list({ page: p, limit: 100 })
+        all.push(...data)
+        if (data.length < 100) break
+      }
+      setWorkouts(all)
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => { fetchPage(1) }, [])
+
+  const switchView = (mode: ViewMode) => {
+    setViewMode(mode)
+    if (mode !== 'days' && workouts.length < 100) {
+      fetchAll()
+    }
+  }
 
   const loadMore = () => {
     const next = page + 1
@@ -49,13 +112,33 @@ export function HistoryPage() {
     return acc
   }, {} as Record<string, Workout[]>)
 
+  const monthGroups = viewMode === 'months' ? aggregateWorkouts(workouts, 'months') : []
+  const yearGroups = viewMode === 'years' ? aggregateWorkouts(workouts, 'years') : []
+
+  const isEmpty = workouts.length === 0
+
   return (
     <div className="page px-4">
       <PageHeader title="Workout History" subtitle="All past sessions" />
 
+      {/* View toggle */}
+      <div className="flex gap-1 p-1 bg-bg-card border border-border rounded-2xl mb-4">
+        {(['days', 'months', 'years'] as ViewMode[]).map(mode => (
+          <button
+            key={mode}
+            onClick={() => switchView(mode)}
+            className={`flex-1 py-2 rounded-xl text-xs font-semibold capitalize transition-all ${
+              viewMode === mode ? 'bg-primary-700 text-white shadow-sm' : 'text-text-muted hover:text-text-primary'
+            }`}
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+
       {loading && workouts.length === 0 ? (
         <SkeletonList count={4} />
-      ) : workouts.length === 0 ? (
+      ) : isEmpty ? (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -73,12 +156,14 @@ export function HistoryPage() {
         </motion.div>
       ) : (
         <div className="space-y-6">
-          {Object.entries(grouped).map(([date, dayWorkouts], groupIdx) => (
+
+          {/* ── DAY VIEW ── */}
+          {viewMode === 'days' && Object.entries(grouped).map(([date, dayWorkouts], groupIdx) => (
             <motion.div
               key={date}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: groupIdx * 0.06 }}
+              transition={{ delay: groupIdx * 0.05 }}
             >
               <div className="flex items-center gap-2 mb-2">
                 <Calendar className="w-3.5 h-3.5 text-text-muted" />
@@ -121,7 +206,9 @@ export function HistoryPage() {
                             </div>
                           )}
                         </div>
-                        {isExpanded ? <ChevronUp className="w-4 h-4 text-text-muted flex-shrink-0 ml-2" /> : <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0 ml-2" />}
+                        {isExpanded
+                          ? <ChevronUp className="w-4 h-4 text-text-muted flex-shrink-0 ml-2" />
+                          : <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0 ml-2" />}
                       </button>
 
                       {isExpanded && (
@@ -131,7 +218,6 @@ export function HistoryPage() {
                           exit={{ height: 0, opacity: 0 }}
                           className="overflow-hidden border-t border-border px-4 pb-4"
                         >
-                          {/* Group by exercise */}
                           {(() => {
                             const byExercise: Record<string, typeof w.sets> = {}
                             ;(w.sets || []).forEach(s => {
@@ -166,7 +252,7 @@ export function HistoryPage() {
             </motion.div>
           ))}
 
-          {hasMore && (
+          {viewMode === 'days' && hasMore && (
             <button
               onClick={loadMore}
               disabled={loading}
@@ -174,6 +260,94 @@ export function HistoryPage() {
             >
               {loading ? 'Loading...' : 'Load more'}
             </button>
+          )}
+
+          {/* ── MONTH VIEW ── */}
+          {viewMode === 'months' && monthGroups.map((g, i) => (
+            <motion.div key={g.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+              <Card padding="md">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <BarChart2 className="w-4 h-4 text-primary-400" />
+                    <p className="font-semibold text-text-primary">{g.label}</p>
+                  </div>
+                  <span className="text-xs text-text-muted">{g.count} {g.count === 1 ? 'workout' : 'workouts'}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-bg-tertiary rounded-xl p-3 text-center">
+                    <p className="text-base font-bold text-text-primary">{g.totalSets}</p>
+                    <p className="text-xs text-text-muted">Sets</p>
+                  </div>
+                  <div className="bg-bg-tertiary rounded-xl p-3 text-center">
+                    <p className="text-base font-bold text-text-primary">{g.totalVolume > 0 ? `${Math.round(g.totalVolume / 1000)}k` : '—'}</p>
+                    <p className="text-xs text-text-muted">Vol (kg)</p>
+                  </div>
+                  <div className="bg-bg-tertiary rounded-xl p-3 text-center">
+                    <p className="text-base font-bold text-text-primary">{g.count}</p>
+                    <p className="text-xs text-text-muted">Days</p>
+                  </div>
+                </div>
+                {g.muscles.length > 0 && (
+                  <div className="flex gap-1 mt-3 flex-wrap">
+                    {g.muscles.slice(0, 6).map(m => (
+                      <span
+                        key={m}
+                        className="px-2 py-0.5 rounded-full text-xs font-medium"
+                        style={{ background: `${MUSCLE_COLORS[m]}18`, color: MUSCLE_COLORS[m] }}
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </motion.div>
+          ))}
+
+          {/* ── YEAR VIEW ── */}
+          {viewMode === 'years' && yearGroups.map((g, i) => (
+            <motion.div key={g.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+              <Card padding="md">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <BarChart2 className="w-4 h-4 text-primary-400" />
+                    <p className="text-xl font-bold text-text-primary">{g.label}</p>
+                  </div>
+                  <span className="text-xs text-text-muted">{g.count} {g.count === 1 ? 'workout' : 'workouts'}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-bg-tertiary rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-text-primary">{g.totalSets}</p>
+                    <p className="text-xs text-text-muted">Total Sets</p>
+                  </div>
+                  <div className="bg-bg-tertiary rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-text-primary">{g.totalVolume > 0 ? `${Math.round(g.totalVolume / 1000)}k` : '—'}</p>
+                    <p className="text-xs text-text-muted">Vol (kg)</p>
+                  </div>
+                  <div className="bg-bg-tertiary rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-text-primary">{g.count}</p>
+                    <p className="text-xs text-text-muted">Workouts</p>
+                  </div>
+                </div>
+                {g.muscles.length > 0 && (
+                  <div className="flex gap-1 mt-3 flex-wrap">
+                    {g.muscles.slice(0, 8).map(m => (
+                      <span
+                        key={m}
+                        className="px-2 py-0.5 rounded-full text-xs font-medium"
+                        style={{ background: `${MUSCLE_COLORS[m]}18`, color: MUSCLE_COLORS[m] }}
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </motion.div>
+          ))}
+
+          {loading && workouts.length > 0 && (
+            <div className="text-center py-4 text-text-muted text-sm">Loading...</div>
           )}
         </div>
       )}

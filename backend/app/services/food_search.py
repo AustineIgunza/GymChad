@@ -33,10 +33,15 @@ async def search_open_food_facts(query: str, page_size: int = 20) -> list[dict[s
                 params={
                     "search_terms": query,
                     "json": 1,
-                    "page_size": page_size * 3,  # fetch more so we have enough after filtering
+                    "page_size": page_size * 4,  # fetch more so we have enough after filtering
                     "lc": "en",                   # language: English
-                    "fields": "product_name,brands,nutriments,serving_size,image_thumb_url,lang",
+                    "cc": "us",                   # country: US (biases results toward English)
+                    "fields": "product_name,brands,nutriments,serving_size,image_thumb_url,lang,languages_tags",
                     "sort_by": "unique_scans_n",  # most scanned = most popular / reliable
+                    # Tag filter: only products with English language data
+                    "tagtype_0": "languages",
+                    "tag_contains_0": "contains",
+                    "tag_0": "en",
                 },
             )
             response.raise_for_status()
@@ -60,6 +65,11 @@ async def search_open_food_facts(query: str, page_size: int = 20) -> list[dict[s
 
         # Skip non-English product names (prevents results in Arabic, Chinese, etc.)
         if not _is_english(name):
+            continue
+
+        # Also skip if the product's primary language is explicitly non-English
+        lang = product.get("lang", "")
+        if lang and lang not in ("en", ""):
             continue
 
         brand = product.get("brands", "").split(",")[0].strip()  # first brand only
