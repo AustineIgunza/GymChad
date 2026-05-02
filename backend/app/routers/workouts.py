@@ -31,7 +31,7 @@ def _set_to_dict(ws: WorkoutSet) -> dict:
     return d
 
 
-@router.get("/", response_model=list[WorkoutResponse])
+@router.get("", response_model=list[WorkoutResponse])
 async def get_workouts(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -206,7 +206,7 @@ async def get_workout(
             "sets": [_set_to_dict(s) for s in workout.sets]}
 
 
-@router.post("/", response_model=WorkoutResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=WorkoutResponse, status_code=status.HTTP_201_CREATED)
 async def create_workout(
     payload: WorkoutCreate,
     db: AsyncSession = Depends(get_db),

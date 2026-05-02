@@ -32,7 +32,7 @@ def _split_to_dict(split: Split) -> dict:
     return d
 
 
-@router.get("/", response_model=list[SplitResponse])
+@router.get("", response_model=list[SplitResponse])
 async def get_splits(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -51,7 +51,7 @@ async def get_splits(
     return [_split_to_dict(s) for s in splits]
 
 
-@router.post("/", response_model=SplitResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=SplitResponse, status_code=status.HTTP_201_CREATED)
 async def create_split(
     payload: SplitCreate,
     db: AsyncSession = Depends(get_db),

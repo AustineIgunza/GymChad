@@ -12,7 +12,7 @@ from app.schemas.measurement import MeasurementCreate, MeasurementResponse
 router = APIRouter()
 
 
-@router.get("/", response_model=list[MeasurementResponse])
+@router.get("", response_model=list[MeasurementResponse])
 async def list_measurements(
     days: int = Query(90, ge=7, le=365),
     db: AsyncSession = Depends(get_db),
@@ -27,7 +27,7 @@ async def list_measurements(
     return result.scalars().all()
 
 
-@router.post("/", response_model=MeasurementResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=MeasurementResponse, status_code=status.HTTP_201_CREATED)
 async def log_measurement(
     payload: MeasurementCreate,
     db: AsyncSession = Depends(get_db),

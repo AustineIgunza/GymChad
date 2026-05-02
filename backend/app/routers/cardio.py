@@ -16,7 +16,7 @@ router = APIRouter()
 
 # ── Cardio sessions ────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=list[CardioResponse])
+@router.get("", response_model=list[CardioResponse])
 async def list_cardio(
     days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
@@ -31,7 +31,7 @@ async def list_cardio(
     return result.scalars().all()
 
 
-@router.post("/", response_model=CardioResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=CardioResponse, status_code=status.HTTP_201_CREATED)
 async def log_cardio(
     payload: CardioCreate,
     db: AsyncSession = Depends(get_db),

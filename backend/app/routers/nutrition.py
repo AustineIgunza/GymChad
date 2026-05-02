@@ -15,7 +15,7 @@ from app.schemas.nutrition import (
 router = APIRouter()
 
 
-@router.get("/", response_model=DailySummary)
+@router.get("", response_model=DailySummary)
 async def get_nutrition(
     log_date: date = Query(default_factory=date.today, alias="date"),
     db: AsyncSession = Depends(get_db),
@@ -74,7 +74,7 @@ async def get_nutrition_summary(
     ]
 
 
-@router.post("/", response_model=NutritionLogResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=NutritionLogResponse, status_code=status.HTTP_201_CREATED)
 async def create_log(
     payload: NutritionLogCreate,
     db: AsyncSession = Depends(get_db),

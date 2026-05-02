@@ -11,7 +11,7 @@ from app.schemas.exercise import ExerciseCreate, ExerciseResponse
 router = APIRouter()
 
 
-@router.get("/", response_model=list[ExerciseResponse])
+@router.get("", response_model=list[ExerciseResponse])
 async def get_exercises(
     muscle_group: MuscleGroup | None = Query(None),
     search: str | None = Query(None),
@@ -37,7 +37,7 @@ async def get_exercises(
     return result.scalars().all()
 
 
-@router.post("/", response_model=ExerciseResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ExerciseResponse, status_code=status.HTTP_201_CREATED)
 async def create_exercise(
     payload: ExerciseCreate,
     db: AsyncSession = Depends(get_db),
