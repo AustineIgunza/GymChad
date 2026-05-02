@@ -45,6 +45,7 @@ limiter = Limiter(key_func=get_remote_address)
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
     lifespan=lifespan,
+    redirect_slashes=False,
     title="GymChad API",
     description="""
 ## GymChad — Gym Tracking & AI Coaching API
