@@ -171,7 +171,7 @@ export function SplitsPage() {
     setTemplateModal(false)
     setName(template.name)
     setDesc(template.desc)
-    setDays(template.days.map((d, i) => ({
+    setDays(template.days.map((d) => ({
       label: d.label,
       exercises: pickExercisesForDay(exercises, d.muscles, 2).map(exId => ({
         exercise_id: exId, sets: 3, repsMin: 8, repsMax: 12,
