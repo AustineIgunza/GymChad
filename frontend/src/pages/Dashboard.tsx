@@ -239,11 +239,11 @@ export function Dashboard() {
                   {/* Net calories bar */}
                   <div className="flex items-center justify-between p-2 rounded-xl bg-bg-tertiary">
                     <span className="text-xs text-text-muted">Net</span>
-                    <span className={`text-sm font-bold ${netCalories >= 0 ? 'text-accent-red' : 'text-accent-green'}`}>
+                    <span className={`text-sm font-bold ${netCalories >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
                       {netCalories >= 0 ? '+' : ''}{Math.round(netCalories)} kcal
                     </span>
                     <span className="text-xs text-text-muted">
-                      {netCalories >= 300 ? '🔥 Surplus' : netCalories <= -300 ? '📉 Deficit' : '⚖️ Maintenance'}
+                      {netCalories >= 300 ? '📉 Deficit' : netCalories <= -300 ? '🔥 Surplus' : '⚖️ Maintenance'}
                     </span>
                   </div>
                 </div>

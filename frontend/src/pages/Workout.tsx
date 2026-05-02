@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Minus, X, Check, ChevronDown, ChevronUp, Search, Timer, Dumbbell, Bike, Trash2 } from 'lucide-react'
 import { workoutsApi } from '../services/workouts'
 import { exercisesApi } from '../services/exercises'
+import { splitsApi } from '../services/splits'
 import { useToast } from '../stores/uiStore'
 import api from '../services/api'
 import { Card } from '../components/ui/Card'
@@ -10,7 +11,7 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
-import type { Exercise, Workout, CardioSession, CardioType } from '../types'
+import type { Exercise, Workout, CardioSession, CardioType, Split } from '../types'
 
 interface LiveSet {
   id?: string
@@ -85,6 +86,8 @@ export function WorkoutPage() {
   const [timer, setTimer] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [activeSplit, setActiveSplit] = useState<Split | null>(null)
+  const [splitDayModal, setSplitDayModal] = useState(false)
   const toast = useToast()
 
   // Cardio state
@@ -106,6 +109,10 @@ export function WorkoutPage() {
 
   useEffect(() => {
     exercisesApi.list().then(setExercises).catch(() => {})
+    splitsApi.list().then(splits => {
+      const active = splits.find(s => s.is_active) || null
+      setActiveSplit(active)
+    }).catch(() => {})
   }, [])
 
   const fetchCardioSessions = useCallback(async () => {
@@ -167,12 +174,66 @@ export function WorkoutPage() {
     }
   }
 
-  const startWorkout = async () => {
+  const startWorkout = () => {
+    if (activeSplit) {
+      setSplitDayModal(true)
+    } else {
+      beginWorkout(null)
+    }
+  }
+
+  const beginWorkout = async (splitDayIdx: number | null) => {
+    setSplitDayModal(false)
     setLoading(true)
     try {
-      const w = await workoutsApi.create({ label: `Workout — ${new Date().toLocaleDateString()}` })
+      const dayLabel = splitDayIdx !== null && activeSplit
+        ? `${activeSplit.days[splitDayIdx]?.label} — ${new Date().toLocaleDateString()}`
+        : `Workout — ${new Date().toLocaleDateString()}`
+      const w = await workoutsApi.create({ label: dayLabel })
       setWorkout(w)
       setTimerRunning(true)
+
+      // Auto-populate exercises from the chosen split day
+      if (splitDayIdx !== null && activeSplit) {
+        const splitDay = activeSplit.days[splitDayIdx]
+        if (splitDay?.exercises?.length) {
+          const newBlocks: ExerciseBlock[] = splitDay.exercises
+            .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+            .map(sde => {
+              const ex = exercises.find(e => e.id === sde.exercise_id)
+              if (!ex) return null
+              const setCount = sde.target_sets || 3
+              const targetReps = sde.target_reps_min || 8
+              return {
+                exercise: ex,
+                expanded: true,
+                sets: Array.from({ length: setCount }, (_, i) => ({
+                  exercise_id: ex.id,
+                  exercise_name: ex.name,
+                  set_number: i + 1,
+                  reps: targetReps,
+                  weight_kg: 0,
+                  is_warmup: false,
+                  saved: false,
+                })),
+                prevBest: null,
+              }
+            })
+            .filter(Boolean) as ExerciseBlock[]
+          setBlocks(newBlocks)
+
+          // Fetch prev bests in background
+          newBlocks.forEach((block, bi) => {
+            workoutsApi.exerciseHistory(block.exercise.id, 1).then(hist => {
+              if (hist[0]?.sets?.length) {
+                const best = hist[0].sets.reduce((a: any, b: any) => b.weight_kg > a.weight_kg ? b : a, hist[0].sets[0])
+                setBlocks(prev => prev.map((bl, i) => i === bi ? { ...bl, prevBest: best } : bl))
+              }
+            }).catch(() => {})
+          })
+        }
+      }
+
       toast.success('Workout started!')
     } catch {
       toast.error('Failed to start workout')
@@ -627,6 +688,41 @@ export function WorkoutPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Split day picker modal */}
+      {activeSplit && (
+        <Modal open={splitDayModal} onClose={() => setSplitDayModal(false)} title={`Start: ${activeSplit.name}`}>
+          <p className="text-sm text-text-muted mb-4">Choose which day to train today:</p>
+          <div className="space-y-2">
+            {activeSplit.days
+              .sort((a, b) => a.day_number - b.day_number)
+              .map((day, idx) => (
+                <button
+                  key={day.id}
+                  onClick={() => beginWorkout(idx)}
+                  className="w-full text-left p-4 rounded-2xl bg-bg-tertiary hover:bg-bg-hover border border-border transition-colors"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-semibold text-text-primary text-sm">Day {day.day_number} — {day.label}</p>
+                    <span className="text-xs text-text-muted">{day.exercises?.length || 0} exercises</span>
+                  </div>
+                  {day.exercises?.length > 0 && (
+                    <p className="text-xs text-text-muted truncate">
+                      {day.exercises.slice(0, 3).map(e => e.exercise?.name).filter(Boolean).join(', ')}
+                      {day.exercises.length > 3 ? ` +${day.exercises.length - 3} more` : ''}
+                    </p>
+                  )}
+                </button>
+              ))}
+            <button
+              onClick={() => beginWorkout(null)}
+              className="w-full text-center py-3 text-sm text-text-muted hover:text-text-primary transition-colors border border-dashed border-border rounded-2xl"
+            >
+              Free workout (no split)
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {/* Exercise picker modal */}
       <Modal open={pickModal} onClose={() => setPickModal(false)} title="Add Exercise">

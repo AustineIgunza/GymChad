@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, X, PencilLine, Star } from 'lucide-react'
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, X, PencilLine, Star, Pencil } from 'lucide-react'
 import { nutritionApi } from '../services/nutrition'
 import { useAuthStore } from '../stores/authStore'
 import { useToast } from '../stores/uiStore'
@@ -284,6 +284,10 @@ export function NutritionPage() {
   const [manualFood, setManualFood] = useState<ManualFood>(defaultManual)
   const [servingUnit, setServingUnit] = useState<ServingUnit>('g')
   const [gramsPerPiece, setGramsPerPiece] = useState('100')
+  // Edit log state
+  const [editLog, setEditLog] = useState<NutritionLog | null>(null)
+  const [editQuantity, setEditQuantity] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
   const toast = useToast()
 
   const fetchNutrition = async (d: string) => {
@@ -386,6 +390,35 @@ export function NutritionPage() {
       toast.error('Failed to save — please try again')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const openEdit = (log: NutritionLog) => {
+    setEditLog(log)
+    setEditQuantity(String(log.quantity_g))
+  }
+
+  const handleEditSave = async () => {
+    if (!editLog) return
+    const newQty = parseFloat(editQuantity)
+    if (!newQty || newQty <= 0) { toast.error('Enter a valid quantity'); return }
+    const ratio = newQty / editLog.quantity_g
+    setEditSaving(true)
+    try {
+      await nutritionApi.update(editLog.id, {
+        quantity_g: newQty,
+        calories: Math.round(editLog.calories * ratio * 10) / 10,
+        protein_g: Math.round(editLog.protein_g * ratio * 10) / 10,
+        carbs_g: Math.round(editLog.carbs_g * ratio * 10) / 10,
+        fat_g: Math.round(editLog.fat_g * ratio * 10) / 10,
+      })
+      setEditLog(null)
+      await refreshNutrition(date)
+      toast.success('Updated!')
+    } catch {
+      toast.error('Failed to update')
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -505,8 +538,14 @@ export function NutritionPage() {
                       <p className="text-sm font-medium text-text-primary truncate">{log.food_name}</p>
                       <p className="text-xs text-text-muted">{log.quantity_g % 1 === 0 ? log.quantity_g : log.quantity_g.toFixed(1)}g · {Math.round(log.protein_g)}g P · {Math.round(log.carbs_g)}g C · {Math.round(log.fat_g)}g F</p>
                     </div>
-                    <div className="flex items-center gap-2 ml-3">
-                      <span className="text-sm font-semibold text-text-secondary">{Math.round(log.calories)}</span>
+                    <div className="flex items-center gap-1 ml-3">
+                      <span className="text-sm font-semibold text-text-secondary mr-1">{Math.round(log.calories)}</span>
+                      <button
+                        onClick={() => openEdit(log)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-primary-400 hover:bg-primary-400/10 transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => handleDelete(log.id)}
                         className="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-accent-red hover:bg-accent-red/10 transition-colors"
@@ -547,6 +586,44 @@ export function NutritionPage() {
           </motion.div>
         )}
       </div>
+
+      {/* Edit food log modal */}
+      <Modal open={!!editLog} onClose={() => setEditLog(null)} title="Edit Entry">
+        {editLog && (() => {
+          const newQty = parseFloat(editQuantity) || editLog.quantity_g
+          const ratio = newQty / editLog.quantity_g
+          return (
+            <div className="space-y-4">
+              <p className="font-semibold text-text-primary">{editLog.food_name}</p>
+              <div>
+                <label className="text-xs font-medium text-text-secondary block mb-1">Quantity (grams)</label>
+                <input
+                  type="number"
+                  value={editQuantity}
+                  onChange={e => setEditQuantity(e.target.value)}
+                  min="0.1"
+                  step="0.1"
+                  className="w-full px-3 py-2 bg-bg-tertiary border border-border rounded-xl text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-700/50"
+                />
+              </div>
+              <div className="grid grid-cols-4 gap-2 p-3 bg-bg-tertiary rounded-xl text-center">
+                {[
+                  { label: 'Calories', val: Math.round(editLog.calories * ratio) },
+                  { label: 'Protein', val: `${Math.round(editLog.protein_g * ratio * 10) / 10}g` },
+                  { label: 'Carbs', val: `${Math.round(editLog.carbs_g * ratio * 10) / 10}g` },
+                  { label: 'Fat', val: `${Math.round(editLog.fat_g * ratio * 10) / 10}g` },
+                ].map(({ label, val }) => (
+                  <div key={label}>
+                    <div className="text-sm font-bold text-text-primary">{val}</div>
+                    <div className="text-xs text-text-muted">{label}</div>
+                  </div>
+                ))}
+              </div>
+              <Button fullWidth loading={editSaving} onClick={handleEditSave}>Save Changes</Button>
+            </div>
+          )
+        })()}
+      </Modal>
 
       {/* Add food modal */}
       <Modal open={addModal} onClose={closeModal} title="Log Food">

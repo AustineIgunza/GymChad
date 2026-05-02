@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, CheckCircle2, Trash2, ChevronDown, ChevronUp, Zap, Sparkles, Search } from 'lucide-react'
+import { Plus, CheckCircle2, Trash2, ChevronDown, ChevronUp, Zap, Sparkles, Search, Pencil } from 'lucide-react'
 import { splitsApi } from '../services/splits'
 import { exercisesApi } from '../services/exercises'
 import { useToast } from '../stores/uiStore'
@@ -121,17 +121,18 @@ function pickExercisesForDay(exercises: Exercise[], muscles: MuscleGroup[], perM
 export function SplitsPage() {
   const [splits, setSplits] = useState<Split[]>([])
   const [exercises, setExercises] = useState<Exercise[]>([])
-  const [createModal, setCreateModal] = useState(false)
+  // 'create' | 'template-customize' | 'edit' | null
+  const [modalMode, setModalMode] = useState<'create' | 'template-customize' | 'edit' | null>(null)
   const [templateModal, setTemplateModal] = useState(false)
+  const [editingSplit, setEditingSplit] = useState<Split | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [savingTemplate, setSavingTemplate] = useState<string | null>(null)
   const [exSearch, setExSearch] = useState('')
   const [exMuscleFilter, setExMuscleFilter] = useState<string>('All')
   const toast = useToast()
 
-  // Custom form state
+  // Shared form state (create / customize / edit)
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
 
@@ -166,38 +167,50 @@ export function SplitsPage() {
     }
   }
 
-  const applyTemplate = async (template: SplitTemplate) => {
-    setSavingTemplate(template.id)
-    try {
-      const newSplit = await splitsApi.create({
-        name: template.name,
-        description: template.desc,
-        days: template.days.map((d, i) => ({
-          day_number: i + 1,
-          label: d.label,
-          exercises: pickExercisesForDay(exercises, d.muscles, 2).map((exId, order) => ({
-            exercise_id: exId,
-            order,
-            target_sets: 3,
-            target_reps_min: 8,
-            target_reps_max: 12,
-          })),
-        })),
-      })
-      setSplits(s => [newSplit, ...s])
-      setTemplateModal(false)
-      toast.success(`${template.name} created! You can customise exercises in the split.`)
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Failed to create split from template')
-    } finally {
-      setSavingTemplate(null)
-    }
+  const openTemplateCustomize = (template: SplitTemplate) => {
+    setTemplateModal(false)
+    setName(template.name)
+    setDesc(template.desc)
+    setDays(template.days.map((d, i) => ({
+      label: d.label,
+      exercises: pickExercisesForDay(exercises, d.muscles, 2).map(exId => ({
+        exercise_id: exId, sets: 3, repsMin: 8, repsMax: 12,
+      })),
+    })))
+    setExSearch('')
+    setExMuscleFilter('All')
+    setModalMode('template-customize')
   }
 
-  const createSplit = async () => {
+  const openEdit = (split: Split) => {
+    setEditingSplit(split)
+    setName(split.name)
+    setDesc(split.description || '')
+    setDays(split.days.map(day => ({
+      label: day.label,
+      exercises: (day.exercises || []).map(sde => ({
+        exercise_id: sde.exercise_id,
+        sets: sde.target_sets || 3,
+        repsMin: sde.target_reps_min || 8,
+        repsMax: sde.target_reps_max || 12,
+      })),
+    })))
+    setExSearch('')
+    setExMuscleFilter('All')
+    setModalMode('edit')
+  }
+
+  const resetModal = () => {
+    setModalMode(null)
+    setEditingSplit(null)
+    setName(''); setDesc(''); setDays([{ label: 'Day 1', exercises: [] }])
+    setExSearch(''); setExMuscleFilter('All')
+  }
+
+  const saveSplit = async () => {
     setSaving(true)
     try {
-      const newSplit = await splitsApi.create({
+      const payload = {
         name,
         description: desc || undefined,
         days: days.map((d, i) => ({
@@ -211,13 +224,23 @@ export function SplitsPage() {
             target_reps_max: ex.repsMax,
           })),
         })),
-      })
-      setSplits(s => [newSplit, ...s])
-      setCreateModal(false)
-      setName(''); setDesc(''); setDays([{ label: 'Day 1', exercises: [] }])
-      toast.success('Split created!')
+      }
+      if (modalMode === 'edit' && editingSplit) {
+        // Delete old + recreate (backend doesn't support full exercise replacement)
+        const wasActive = editingSplit.is_active
+        await splitsApi.delete(editingSplit.id)
+        const newSplit = await splitsApi.create(payload)
+        if (wasActive) await splitsApi.activate(newSplit.id)
+        setSplits(s => s.filter(sp => sp.id !== editingSplit.id).concat({ ...newSplit, is_active: wasActive }))
+        toast.success('Split updated!')
+      } else {
+        const newSplit = await splitsApi.create(payload)
+        setSplits(s => [newSplit, ...s])
+        toast.success('Split created!')
+      }
+      resetModal()
     } catch {
-      toast.error('Failed to create split')
+      toast.error(modalMode === 'edit' ? 'Failed to update split' : 'Failed to create split')
     } finally {
       setSaving(false)
     }
@@ -254,7 +277,7 @@ export function SplitsPage() {
             <Button size="sm" variant="outline" onClick={() => setTemplateModal(true)}>
               <Sparkles className="w-4 h-4" /> Templates
             </Button>
-            <Button size="sm" onClick={() => setCreateModal(true)}>
+            <Button size="sm" onClick={() => { resetModal(); setModalMode('create') }}>
               <Plus className="w-4 h-4" /> Custom
             </Button>
           </div>
@@ -284,7 +307,7 @@ export function SplitsPage() {
             <Button onClick={() => setTemplateModal(true)}>
               <Sparkles className="w-4 h-4" /> Use a Template
             </Button>
-            <Button variant="outline" onClick={() => setCreateModal(true)}>
+            <Button variant="outline" onClick={() => { resetModal(); setModalMode('create') }}>
               <Plus className="w-4 h-4" /> Build Custom Split
             </Button>
           </div>
@@ -321,6 +344,12 @@ export function SplitsPage() {
                         className="w-8 h-8 flex items-center justify-center text-text-muted hover:text-text-primary"
                       >
                         {expandedId === split.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={() => openEdit(split)}
+                        className="w-8 h-8 flex items-center justify-center text-text-muted hover:text-primary-400 transition-colors"
+                      >
+                        <Pencil className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => deleteSplit(split.id)}
@@ -370,7 +399,7 @@ export function SplitsPage() {
 
       {/* Template picker modal */}
       <Modal open={templateModal} onClose={() => setTemplateModal(false)} title="Choose a Template">
-        <p className="text-sm text-text-muted mb-4">Select a proven training template. Exercises are pre-filled — you can customise them after.</p>
+        <p className="text-sm text-text-muted mb-4">Select a template — you'll be able to customise exercises before saving.</p>
         <div className="space-y-3">
           {PRESET_TEMPLATES.map(template => (
             <div key={template.id} className="p-4 rounded-2xl bg-bg-tertiary border border-border">
@@ -388,22 +417,20 @@ export function SplitsPage() {
                   <span key={i} className="text-xs px-2 py-0.5 bg-bg-secondary rounded text-text-secondary">{d.label.split(' — ')[0]}</span>
                 ))}
               </div>
-              <Button
-                fullWidth
-                size="sm"
-                loading={savingTemplate === template.id}
-                disabled={savingTemplate !== null && savingTemplate !== template.id}
-                onClick={() => applyTemplate(template)}
-              >
-                Use {template.name}
+              <Button fullWidth size="sm" onClick={() => openTemplateCustomize(template)}>
+                Customise &amp; Use {template.name}
               </Button>
             </div>
           ))}
         </div>
       </Modal>
 
-      {/* Custom create split modal */}
-      <Modal open={createModal} onClose={() => setCreateModal(false)} title="Create Custom Split">
+      {/* Unified create / customize / edit modal */}
+      <Modal
+        open={modalMode !== null}
+        onClose={resetModal}
+        title={modalMode === 'edit' ? 'Edit Split' : modalMode === 'template-customize' ? 'Customise Template' : 'Create Custom Split'}
+      >
         <div className="space-y-4">
           <Input label="Split Name" placeholder="e.g. PPL 6-Day" value={name} onChange={e => setName(e.target.value)} />
           <Input label="Description (optional)" placeholder="Push Pull Legs..." value={desc} onChange={e => setDesc(e.target.value)} />
@@ -433,7 +460,6 @@ export function SplitsPage() {
                   </div>
                   <p className="text-xs text-text-muted mb-1.5">Select exercises:</p>
                   <div className="mb-2">
-                    {/* Search & muscle filter */}
                     <div className="flex gap-1.5 mb-1.5">
                       <div className="relative flex-1">
                         <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted pointer-events-none" />
@@ -515,8 +541,8 @@ export function SplitsPage() {
             </div>
           </div>
 
-          <Button fullWidth loading={saving} onClick={createSplit} disabled={!name.trim()}>
-            Create Split
+          <Button fullWidth loading={saving} onClick={saveSplit} disabled={!name.trim()}>
+            {modalMode === 'edit' ? 'Save Changes' : 'Create Split'}
           </Button>
         </div>
       </Modal>
