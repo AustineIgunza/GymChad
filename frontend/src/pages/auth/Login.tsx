@@ -12,9 +12,25 @@ export function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [needsConfirmation, setNeedsConfirmation] = useState(false)
+  const [resending, setResending] = useState(false)
   const { initialize } = useAuthStore()
   const navigate = useNavigate()
   const toast = useToast()
+
+  const resendConfirmation = async () => {
+    if (!email) { toast.error('Enter your email first'); return }
+    setResending(true)
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email })
+      if (error) throw error
+      toast.success('Confirmation email resent — check your inbox')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to resend')
+    } finally {
+      setResending(false)
+    }
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -31,7 +47,15 @@ export function Login() {
       }
       navigate('/')
     } catch (err: any) {
-      toast.error(err.message || 'Login failed')
+      const msg: string = err.message || ''
+      if (msg.toLowerCase().includes('email not confirmed')) {
+        setNeedsConfirmation(true)
+        toast.error('Please confirm your email first — check your inbox for a confirmation link.')
+      } else if (msg.toLowerCase().includes('invalid login') || msg.toLowerCase().includes('invalid credentials')) {
+        toast.error('Wrong email or password.')
+      } else {
+        toast.error(msg || 'Login failed')
+      }
     } finally {
       setLoading(false)
     }
@@ -87,6 +111,18 @@ export function Login() {
               Sign In
             </Button>
           </form>
+          {needsConfirmation && (
+            <div className="mt-4 p-3 bg-accent-yellow/10 border border-accent-yellow/30 rounded-xl text-center">
+              <p className="text-xs text-text-secondary mb-2">Didn't get the confirmation email?</p>
+              <button
+                onClick={resendConfirmation}
+                disabled={resending}
+                className="text-xs font-semibold text-accent-yellow hover:text-accent-yellow/80 disabled:opacity-50"
+              >
+                {resending ? 'Sending...' : 'Resend confirmation email'}
+              </button>
+            </div>
+          )}
         </div>
 
         <p className="text-center text-text-muted text-sm mt-6">
