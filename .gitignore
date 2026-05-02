@@ -41,3 +41,15 @@ Thumbs.db
 
 # Prisma
 prisma/migrations/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+*.db
+*.sqlite3
