@@ -173,6 +173,15 @@ const UNIT_TO_GRAMS: Partial<Record<ServingUnit, number>> = {
   g: 1, ml: 1, oz: 28.35, cup: 240, tbsp: 15, tsp: 5,
 }
 
+interface PendingItem {
+  food_name: string
+  quantity_g: number
+  calories: number
+  protein_g: number
+  carbs_g: number
+  fat_g: number
+}
+
 // Manual entry stores per-100g values + amount/unit
 interface ManualFood {
   name: string
@@ -288,6 +297,7 @@ export function NutritionPage() {
   const [editLog, setEditLog] = useState<NutritionLog | null>(null)
   const [editQuantity, setEditQuantity] = useState('')
   const [editSaving, setEditSaving] = useState(false)
+  const [pendingItems, setPendingItems] = useState<PendingItem[]>([])
   const toast = useToast()
 
   const fetchNutrition = async (d: string) => {
@@ -347,44 +357,49 @@ export function NutritionPage() {
     }
   }
 
-  const handleLog = async () => {
+  // Add current food selection to the pending queue (doesn't close modal)
+  const addToPending = () => {
     if (!selectedFood) return
-    setSaving(true)
     const g = toGrams(parseFloat(quantity) || 1, servingUnit, parseFloat(gramsPerPiece) || 100)
-    const macros = calcMacros(selectedFood, g)
-    try {
-      await nutritionApi.create({ date, meal_type: mealType, food_name: selectedFood.name, quantity_g: g, ...macros })
-      closeModal()
-      toast.success('Food logged!')
-      refreshNutrition(date)
-    } catch {
-      toast.error('Failed to save — please try again')
-    } finally {
-      setSaving(false)
-    }
+    const m = calcMacros(selectedFood, g)
+    setPendingItems(prev => [...prev, { food_name: selectedFood.name, quantity_g: g, ...m }])
+    setSelectedFood(null)
+    setQuantity('100')
+    setServingUnit('g')
+    setGramsPerPiece('100')
   }
 
-  const handleLogManual = async () => {
+  const addManualToPending = () => {
     const cal100 = parseFloat(manualFood.cal100)
     if (!manualFood.name.trim() || !cal100) {
       toast.error('Name and calories per 100g are required')
       return
     }
     const foodAsCommon: FoodSearchResult = {
-      id: 'manual',
-      name: manualFood.name,
+      id: 'manual', name: manualFood.name,
       calories_per_100g: cal100,
       protein_per_100g: parseFloat(manualFood.pro100) || 0,
       carbs_per_100g: parseFloat(manualFood.carb100) || 0,
       fat_per_100g: parseFloat(manualFood.fat100) || 0,
     }
     const g = toGrams(parseFloat(manualFood.quantity) || 1, servingUnit, parseFloat(gramsPerPiece) || 100)
-    const macros = calcMacros(foodAsCommon, g)
+    const m = calcMacros(foodAsCommon, g)
+    setPendingItems(prev => [...prev, { food_name: manualFood.name, quantity_g: g, ...m }])
+    setManualFood(defaultManual)
+    setServingUnit('g')
+    setGramsPerPiece('100')
+  }
+
+  // Log all queued items at once
+  const logAll = async () => {
+    if (!pendingItems.length) return
     setSaving(true)
     try {
-      await nutritionApi.create({ date, meal_type: mealType, food_name: manualFood.name, quantity_g: g, ...macros })
+      await Promise.all(
+        pendingItems.map(item => nutritionApi.create({ date, meal_type: mealType, ...item }))
+      )
       closeModal()
-      toast.success('Food logged!')
+      toast.success(`${pendingItems.length} food${pendingItems.length > 1 ? 's' : ''} logged!`)
       refreshNutrition(date)
     } catch {
       toast.error('Failed to save — please try again')
@@ -444,6 +459,7 @@ export function NutritionPage() {
     setServingUnit('g')
     setGramsPerPiece('100')
     setQuantity('100')
+    setPendingItems([])
   }
 
   const groupedLogs = MEAL_TYPES.reduce((acc, m) => {
@@ -666,6 +682,39 @@ export function NutritionPage() {
           </div>
         </div>
 
+        {/* Pending items queue */}
+        {pendingItems.length > 0 && (
+          <div className="mb-4 p-3 bg-bg-tertiary rounded-xl border border-border space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-text-secondary">
+                {pendingItems.length} item{pendingItems.length > 1 ? 's' : ''} queued
+              </span>
+              <span className="text-xs font-bold text-primary-400">
+                {Math.round(pendingItems.reduce((s, i) => s + i.calories, 0))} kcal total
+              </span>
+            </div>
+            {pendingItems.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-text-primary truncate">{item.food_name}</p>
+                  <p className="text-xs text-text-muted">
+                    {item.quantity_g % 1 === 0 ? item.quantity_g : item.quantity_g.toFixed(1)}g · {Math.round(item.calories)} kcal · {Math.round(item.protein_g)}P
+                  </p>
+                </div>
+                <button
+                  onClick={() => setPendingItems(p => p.filter((_, i) => i !== idx))}
+                  className="flex-shrink-0 text-text-muted hover:text-accent-red transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+            <Button fullWidth size="sm" loading={saving} onClick={logAll}>
+              Log {pendingItems.length} Food{pendingItems.length > 1 ? 's' : ''}
+            </Button>
+          </div>
+        )}
+
         {/* ── COMMON FOODS MODE ── */}
         {addMode === 'common' && (
           !selectedFood ? (
@@ -721,7 +770,7 @@ export function NutritionPage() {
               </div>
               <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
               <MacroPreview macros={macros} />
-              <Button fullWidth loading={saving} onClick={handleLog}>Log Food</Button>
+              <Button fullWidth onClick={addToPending}>Add to Meal</Button>
             </div>
           )
         )}
@@ -771,7 +820,7 @@ export function NutritionPage() {
               <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
               <MacroPreview macros={macros} />
 
-              <Button fullWidth loading={saving} onClick={handleLog}>Log Food</Button>
+              <Button fullWidth onClick={addToPending}>Add to Meal</Button>
             </div>
           )
         )}
@@ -823,9 +872,9 @@ export function NutritionPage() {
               {manualGrams > 0 && manualCal100 > 0 && (
                 <MacroPreview macros={{ calories: preview.cal, protein_g: preview.pro, carbs_g: preview.carb, fat_g: preview.fat }} />
               )}
-              <Button fullWidth loading={saving} onClick={handleLogManual}
+              <Button fullWidth onClick={addManualToPending}
                 disabled={!manualFood.name.trim() || !manualFood.cal100 || !manualFood.quantity}>
-                Log Food
+                Add to Meal
               </Button>
             </div>
           )
