@@ -99,7 +99,7 @@ export function Dashboard() {
   return (
     <div className="page px-4">
       {/* Header */}
-      <div className="flex items-center justify-between pt-14 pb-2">
+      <div className="flex items-center justify-between pt-14 pb-2 md:pt-8 md:px-4">
         <div>
           <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-text-muted text-sm">
             {greeting}
@@ -368,7 +368,7 @@ export function Dashboard() {
         )}
 
         {/* Quick links */}
-        <motion.div variants={item} className="grid grid-cols-2 gap-3">
+        <motion.div variants={item} className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { to: '/splits', icon: '📋', label: 'My Splits', desc: 'Manage programs' },
             { to: '/history', icon: '📅', label: 'History', desc: 'Past workouts' },

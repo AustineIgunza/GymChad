@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAuthStore } from './stores/authStore'
 import { BottomNav } from './components/ui/BottomNav'
+import { SideNav } from './components/ui/SideNav'
 import { ToastContainer } from './components/ui/Toast'
 
 // Pages
@@ -18,14 +19,14 @@ import { SplitsPage } from './pages/Splits'
 import { HistoryPage } from './pages/History'
 
 const pageVariants = {
-  initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] } },
-  exit:    { opacity: 0, y: -8, transition: { duration: 0.15, ease: 'easeIn' } },
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] } },
+  exit:    { opacity: 0, y: -6, transition: { duration: 0.14, ease: 'easeIn' } },
 }
 
 function PageTransition({ children }: { children: React.ReactNode }) {
   return (
-    <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
+    <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit" className="h-full">
       {children}
     </motion.div>
   )
@@ -55,12 +56,28 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     )
   }
   if (!user) return <Navigate to="/login" replace />
-  // New user hasn't done onboarding yet
   const needsOnboarding = !user.weight_kg && !user.calorie_target
   if (needsOnboarding && window.location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />
   }
   return <>{children}</>
+}
+
+/** Shell used by every protected page — sidebar + bottom nav + content offset */
+function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-screen">
+      <SideNav />
+      {/* Content shifts right on md (icon sidebar=64px) and lg (full sidebar=224px) */}
+      <main className="flex-1 min-w-0 md:ml-16 lg:ml-56 pb-20 md:pb-0">
+        {/* cap content width on large screens so it doesn't stretch uncomfortably */}
+        <div className="max-w-4xl mx-auto">
+          {children}
+        </div>
+      </main>
+      <BottomNav />
+    </div>
+  )
 }
 
 function AppRoutes() {
@@ -77,58 +94,37 @@ function AppRoutes() {
         {/* Protected routes */}
         <Route path="/" element={
           <ProtectedRoute>
-            <div className="pb-20">
-              <PageTransition><Dashboard /></PageTransition>
-              <BottomNav />
-            </div>
+            <AppShell><PageTransition><Dashboard /></PageTransition></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/workout" element={
           <ProtectedRoute>
-            <div className="pb-20">
-              <PageTransition><WorkoutPage /></PageTransition>
-              <BottomNav />
-            </div>
+            <AppShell><PageTransition><WorkoutPage /></PageTransition></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/nutrition" element={
           <ProtectedRoute>
-            <div className="pb-20">
-              <PageTransition><NutritionPage /></PageTransition>
-              <BottomNav />
-            </div>
+            <AppShell><PageTransition><NutritionPage /></PageTransition></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/analytics" element={
           <ProtectedRoute>
-            <div className="pb-20">
-              <PageTransition><AnalyticsPage /></PageTransition>
-              <BottomNav />
-            </div>
+            <AppShell><PageTransition><AnalyticsPage /></PageTransition></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/splits" element={
           <ProtectedRoute>
-            <div className="pb-20">
-              <PageTransition><SplitsPage /></PageTransition>
-              <BottomNav />
-            </div>
+            <AppShell><PageTransition><SplitsPage /></PageTransition></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/history" element={
           <ProtectedRoute>
-            <div className="pb-20">
-              <PageTransition><HistoryPage /></PageTransition>
-              <BottomNav />
-            </div>
+            <AppShell><PageTransition><HistoryPage /></PageTransition></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/settings" element={
           <ProtectedRoute>
-            <div className="pb-20">
-              <PageTransition><SettingsPage /></PageTransition>
-              <BottomNav />
-            </div>
+            <AppShell><PageTransition><SettingsPage /></PageTransition></AppShell>
           </ProtectedRoute>
         } />
 

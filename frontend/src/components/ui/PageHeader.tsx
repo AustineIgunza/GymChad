@@ -17,7 +17,7 @@ export function PageHeader({ title, subtitle, back, action, className }: PageHea
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={clsx('flex items-center justify-between px-4 pt-14 pb-4', className)}
+      className={clsx('flex items-center justify-between px-4 pt-14 pb-4 md:pt-8 md:px-8', className)}
     >
       <div className="flex items-center gap-3">
         {back && (
