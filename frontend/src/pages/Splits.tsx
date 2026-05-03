@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, CheckCircle2, Trash2, ChevronDown, ChevronUp, Zap, Sparkles, Search, Pencil } from 'lucide-react'
+import { Plus, CheckCircle2, Trash2, ChevronDown, ChevronUp, Zap, Sparkles, Search, Pencil, Share2, Copy } from 'lucide-react'
 import { splitsApi } from '../services/splits'
 import { exercisesApi } from '../services/exercises'
+import api from '../services/api'
 import { useToast } from '../stores/uiStore'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -166,6 +167,23 @@ export function SplitsPage() {
     } catch {
       toast.error('Failed to delete split')
     }
+  }
+
+  const duplicateSplit = async (id: string) => {
+    try {
+      await api.post(`/splits/${id}/duplicate`)
+      toast.success('Split duplicated!')
+      splitsApi.list().then(setSplits).catch(() => {})
+    } catch { toast.error('Failed to duplicate') }
+  }
+
+  const shareSplit = async (id: string) => {
+    try {
+      const res = await api.post(`/splits/${id}/share`)
+      const url = `${window.location.origin}/splits/shared/${res.data.shared_token}`
+      await navigator.clipboard.writeText(url)
+      toast.success('Share link copied!')
+    } catch { toast.error('Failed to share') }
   }
 
   const openTemplateCustomize = (template: SplitTemplate) => {
@@ -356,6 +374,20 @@ export function SplitsPage() {
                         className="w-8 h-8 flex items-center justify-center text-text-muted hover:text-primary-400 transition-colors"
                       >
                         <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => shareSplit(split.id)}
+                        className="w-8 h-8 flex items-center justify-center text-text-muted hover:text-accent-green transition-colors"
+                        title="Share split"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => duplicateSplit(split.id)}
+                        className="w-8 h-8 flex items-center justify-center text-text-muted hover:text-primary-400 transition-colors"
+                        title="Duplicate split"
+                      >
+                        <Copy className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => deleteSplit(split.id)}

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Dumbbell, UtensilsCrossed, BarChart2, Settings } from 'lucide-react'
+import { Home, Dumbbell, UtensilsCrossed, Calendar, Wrench } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { clsx } from 'clsx'
 
@@ -7,8 +7,8 @@ const navItems = [
   { to: '/', icon: Home, label: 'Home' },
   { to: '/workout', icon: Dumbbell, label: 'Workout' },
   { to: '/nutrition', icon: UtensilsCrossed, label: 'Nutrition' },
-  { to: '/analytics', icon: BarChart2, label: 'Analytics' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/schedule', icon: Calendar, label: 'Schedule' },
+  { to: '/tools', icon: Wrench, label: 'Tools' },
 ]
 
 export function BottomNav() {

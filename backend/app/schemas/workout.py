@@ -4,16 +4,16 @@ from pydantic import BaseModel
 from datetime import datetime
 
 
-# ── WorkoutSet schemas ────────────────────────────────────────────────────────
-
 class WorkoutSetCreate(BaseModel):
     exercise_id: str
     set_number: int
     reps: int
     weight_kg: float
-    rpe: int | None = None       # Rate of Perceived Exertion: 1–10
+    rpe: int | None = None
     is_warmup: bool = False
     notes: str | None = None
+    set_type: str = "normal"      # normal|warmup|dropset|superset
+    superset_group: int | None = None
 
 
 class WorkoutSetUpdate(BaseModel):
@@ -22,6 +22,8 @@ class WorkoutSetUpdate(BaseModel):
     rpe: int | None = None
     is_warmup: bool | None = None
     notes: str | None = None
+    set_type: str | None = None
+    superset_group: int | None = None
 
 
 class WorkoutSetResponse(BaseModel):
@@ -34,13 +36,13 @@ class WorkoutSetResponse(BaseModel):
     rpe: int | None
     is_warmup: bool
     notes: str | None
-    # Nested exercise info for convenience
+    set_type: str
+    superset_group: int | None
     exercise: dict | None = None
+    is_pr: bool = False  # injected after PR check
 
     model_config = {"from_attributes": True}
 
-
-# ── Workout schemas ───────────────────────────────────────────────────────────
 
 class WorkoutCreate(BaseModel):
     label: str

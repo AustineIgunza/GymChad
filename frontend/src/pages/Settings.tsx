@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { User, Target, LogOut, Scale, ChevronRight, Dumbbell } from 'lucide-react'
+import { User, Target, LogOut, Scale, ChevronRight, Dumbbell, Download } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
-import { useToast } from '../stores/uiStore'
+import { useToast, useUIStore } from '../stores/uiStore'
 import api from '../services/api'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -18,6 +18,7 @@ export function SettingsPage() {
   const [nutritionModal, setNutritionModal] = useState(false)
   const [saving, setSaving] = useState(false)
   const toast = useToast()
+  const { theme, toggleTheme, showRpe, toggleRpe } = useUIStore()
 
   const [form, setForm] = useState({
     name: user?.name || '',
@@ -99,6 +100,19 @@ export function SettingsPage() {
     await logout()
   }
 
+  const handleExport = async (type: 'workouts' | 'measurements' | 'nutrition') => {
+    try {
+      const res = await api.get(`/export/${type}`, { responseType: 'blob' })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `gymchad_${type}_${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success(`${type} exported!`)
+    } catch { toast.error('Export failed') }
+  }
+
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   return (
@@ -122,6 +136,35 @@ export function SettingsPage() {
             </div>
           </div>
         </Card>
+
+        {/* Appearance card */}
+        <div className="glass rounded-2xl p-4 mb-4">
+          <h3 className="font-semibold text-text-primary mb-3">Appearance</h3>
+          <div className="flex items-center justify-between py-2">
+            <div>
+              <p className="text-sm font-medium text-text-primary">Dark Mode</p>
+              <p className="text-xs text-text-muted">Toggle dark/light theme</p>
+            </div>
+            <button
+              onClick={toggleTheme}
+              className={`relative w-12 h-6 rounded-full transition-colors ${theme === 'dark' ? 'bg-primary-700' : 'bg-zinc-400'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${theme === 'dark' ? 'translate-x-6' : ''}`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between py-2 border-t border-border">
+            <div>
+              <p className="text-sm font-medium text-text-primary">Show RPE Selector</p>
+              <p className="text-xs text-text-muted">Rate of Perceived Exertion per set</p>
+            </div>
+            <button
+              onClick={toggleRpe}
+              className={`relative w-12 h-6 rounded-full transition-colors ${showRpe ? 'bg-primary-700' : 'bg-zinc-600'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${showRpe ? 'translate-x-6' : ''}`} />
+            </button>
+          </div>
+        </div>
 
         {/* Settings sections */}
         {[
@@ -175,6 +218,20 @@ export function SettingsPage() {
             </span>
           </div>
         </Card>
+
+        {/* Export Data */}
+        <div className="glass rounded-2xl p-4 mb-4">
+          <h3 className="font-semibold text-text-primary mb-3">Export Data</h3>
+          <div className="space-y-2">
+            {(['workouts', 'measurements', 'nutrition'] as const).map(type => (
+              <button key={type} onClick={() => handleExport(type)}
+                className="w-full flex items-center gap-3 py-2.5 px-3 bg-bg-tertiary rounded-xl hover:bg-bg-hover transition-colors text-left">
+                <Download className="w-4 h-4 text-text-muted" />
+                <span className="text-sm text-text-primary capitalize">Export {type}</span>
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Logout */}
         <Button variant="danger" fullWidth onClick={handleLogout}>

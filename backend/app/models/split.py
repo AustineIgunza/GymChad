@@ -1,14 +1,13 @@
-"""models/split.py — Training split models (Split → SplitDay → SplitDayExercise)"""
+"""models/split.py — Training split models"""
 
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Boolean, ForeignKey, DateTime
+from sqlalchemy import String, Integer, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
 class Split(Base):
-    """A training program, e.g. 'PPL 6-Day' or 'Upper/Lower 4-Day'"""
     __tablename__ = "splits"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -16,6 +15,8 @@ class Split(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_template: Mapped[bool] = mapped_column(Boolean, default=False)
+    shared_token: Mapped[str | None] = mapped_column(String, unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -28,13 +29,12 @@ class Split(Base):
 
 
 class SplitDay(Base):
-    """One day within a split, e.g. 'Push A', 'Chest & Triceps'"""
     __tablename__ = "split_days"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     split_id: Mapped[str] = mapped_column(String, ForeignKey("splits.id", ondelete="CASCADE"), nullable=False, index=True)
-    day_number: Mapped[int] = mapped_column(Integer, nullable=False)   # 1, 2, 3 ...
-    label: Mapped[str] = mapped_column(String, nullable=False)         # "Push", "Pull", "Legs"
+    day_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
 
     split: Mapped["Split"] = relationship(back_populates="days")
     exercises: Mapped[list["SplitDayExercise"]] = relationship(
@@ -45,7 +45,6 @@ class SplitDay(Base):
 
 
 class SplitDayExercise(Base):
-    """An exercise assigned to a split day with target sets/reps"""
     __tablename__ = "split_day_exercises"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))

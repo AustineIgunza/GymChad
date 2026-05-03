@@ -13,12 +13,11 @@ class Workout(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     split_day_id: Mapped[str | None] = mapped_column(String, ForeignKey("split_days.id", ondelete="SET NULL"))
-    label: Mapped[str] = mapped_column(String, nullable=False)  # e.g. "Push A" or "Chest Day"
+    label: Mapped[str] = mapped_column(String, nullable=False)
     date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     duration_min: Mapped[int | None] = mapped_column(Integer)
 
-    # Relationships
     user: Mapped["User"] = relationship(back_populates="workouts")
     sets: Mapped[list["WorkoutSet"]] = relationship(
         back_populates="workout",
@@ -36,10 +35,12 @@ class WorkoutSet(Base):
     set_number: Mapped[int] = mapped_column(Integer, nullable=False)
     reps: Mapped[int] = mapped_column(Integer, nullable=False)
     weight_kg: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    rpe: Mapped[int | None] = mapped_column(Integer)   # Rate of Perceived Exertion 1-10
+    rpe: Mapped[int | None] = mapped_column(Integer)
     is_warmup: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(String)
+    # Superset / dropset support
+    set_type: Mapped[str] = mapped_column(String, default="normal")  # normal|warmup|dropset|superset
+    superset_group: Mapped[int | None] = mapped_column(Integer)      # groups linked exercises
 
-    # Relationships
     workout: Mapped["Workout"] = relationship(back_populates="sets")
     exercise: Mapped["Exercise"] = relationship()

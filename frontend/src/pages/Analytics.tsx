@@ -15,6 +15,7 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { useToast } from '../stores/uiStore'
 import type { Exercise, BodyMeasurement } from '../types'
 import { Plus, TrendingDown, TrendingUp, Target, Minus } from 'lucide-react'
+import { MuscleHeatMap } from '../components/analytics/MuscleHeatMap'
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null
@@ -199,6 +200,8 @@ export function AnalyticsPage() {
   return (
     <div className="page px-4">
       <PageHeader title="Analytics" subtitle="Track your progress over time" />
+
+      <MuscleHeatMap />
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-bg-tertiary rounded-2xl mb-4">

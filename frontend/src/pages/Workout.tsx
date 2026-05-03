@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Minus, X, Check, ChevronDown, ChevronUp, Search, Timer, Dumbbell, Bike, Trash2, Bell, SkipForward } from 'lucide-react'
+import { Plus, Minus, X, Check, ChevronDown, ChevronUp, Search, Timer, Dumbbell, Bike, Trash2, Bell, SkipForward, MessageSquare } from 'lucide-react'
 import { workoutsApi } from '../services/workouts'
 import { exercisesApi } from '../services/exercises'
 import { splitsApi } from '../services/splits'
-import { useToast } from '../stores/uiStore'
+import { useToast, useUIStore } from '../stores/uiStore'
 import api from '../services/api'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -20,9 +20,13 @@ interface LiveSet {
   set_number: number
   reps: number
   weight_kg: number
-  rpe?: number
+  rpe?: number | null
   is_warmup: boolean
   saved: boolean
+  set_type?: 'normal' | 'warmup' | 'dropset' | 'superset'
+  superset_group?: number | null
+  notes?: string
+  showNotes?: boolean
 }
 
 interface ExerciseBlock {
@@ -123,6 +127,11 @@ export function WorkoutPage() {
   const [restSeconds, setRestSeconds] = useState<number | null>(null)
   const [restDuration, setRestDuration] = useState(90)
   const restRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // PR celebration
+  const [prCelebration, setPrCelebration] = useState<{ show: boolean; weight: number; reps: number; exerciseName: string }>({ show: false, weight: 0, reps: 0, exerciseName: '' })
+  // Session notes
+  const [sessionNotes, setSessionNotes] = useState('')
+  const { showRpe } = useUIStore()
   const toast = useToast()
 
   // Cardio
@@ -353,13 +362,16 @@ export function WorkoutPage() {
   const saveSet = async (blockIdx: number, setIdx: number) => {
     if (!workout) return
     const s = blocks[blockIdx].sets[setIdx]
+    const block = blocks[blockIdx]
     try {
       const saved = await workoutsApi.addSet(workout.id, {
         exercise_id: s.exercise_id,
         set_number: s.set_number,
         reps: s.reps,
         weight_kg: s.weight_kg,
+        rpe: s.rpe ?? undefined,
         is_warmup: s.is_warmup,
+        notes: s.notes,
       })
       setBlocks(b => {
         const next = [...b]
@@ -368,6 +380,16 @@ export function WorkoutPage() {
       })
       // Start rest timer after saving a working set
       if (!s.is_warmup) setRestSeconds(restDuration)
+      // Check for PR (non-warmup sets only)
+      if (!s.is_warmup && s.weight_kg > 0) {
+        try {
+          const records = await api.get(`/records/${s.exercise_id}`).then(r => r.data) as any[]
+          const weightPr = records.find(r => r.pr_type === 'weight')
+          if (!weightPr || s.weight_kg > weightPr.weight_kg) {
+            setPrCelebration({ show: true, weight: s.weight_kg, reps: s.reps, exerciseName: block.exercise.name })
+          }
+        } catch { /* PR check is non-critical */ }
+      }
     } catch {
       toast.error('Failed to save set')
     }
@@ -377,11 +399,12 @@ export function WorkoutPage() {
     if (!workout) return
     stopRest()
     setTimerRunning(false)
-    await workoutsApi.update(workout.id, { duration_min: Math.floor(timer / 60) })
+    await workoutsApi.update(workout.id, { duration_min: Math.floor(timer / 60), notes: sessionNotes || undefined })
     toast.success(`Workout done! ${formatTime(timer)} ⚡`)
     setWorkout(null)
     setBlocks([])
     setTimer(0)
+    setSessionNotes('')
   }
 
   // Group exercises for picker
@@ -407,6 +430,35 @@ export function WorkoutPage() {
 
   return (
     <div className="page px-4">
+      {/* PR Celebration overlay */}
+      <AnimatePresence>
+        {prCelebration.show && (
+          <>
+            <style>{`@keyframes confettiFall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}`}</style>
+            <div className="fixed inset-0 pointer-events-none z-[60] overflow-hidden">
+              {Array.from({ length: 40 }, (_, i) => (
+                <div key={i} className="absolute rounded-sm" style={{
+                  left: `${(i * 7.3) % 100}%`, top: '-10px',
+                  width: 6 + (i % 5) * 2, height: 6 + (i % 5) * 2,
+                  background: ['#dc2626','#1d4ed8','#7c3aed','#f59e0b','#10b981'][i % 5],
+                  animation: `confettiFall ${1.5 + (i * 0.07) % 1}s ${(i * 0.05) % 0.5}s ease-in forwards`,
+                }} />
+              ))}
+            </div>
+            <motion.div initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5 }}
+              className="fixed inset-0 z-[61] flex items-center justify-center pointer-events-none">
+              <div className="bg-bg-card/95 backdrop-blur-xl border-2 border-primary-700/50 rounded-3xl p-8 text-center shadow-2xl max-w-xs mx-4 pointer-events-auto"
+                onClick={() => setPrCelebration(p => ({ ...p, show: false }))}>
+                <div className="text-5xl mb-3">🏆</div>
+                <h2 className="text-2xl font-bold text-gradient mb-1">New PR!</h2>
+                <p className="text-text-muted text-sm mb-3">{prCelebration.exerciseName}</p>
+                <p className="text-3xl font-bold text-text-primary">{prCelebration.weight}kg × {prCelebration.reps}</p>
+                <p className="text-xs text-text-muted mt-3">Tap to dismiss</p>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
       <PageHeader title="Workout" subtitle="Log your training session" />
 
       {/* Tabs */}
@@ -450,6 +502,15 @@ export function WorkoutPage() {
               </div>
             ) : (
               <>
+                {/* Session notes */}
+                <textarea
+                  value={sessionNotes}
+                  onChange={e => setSessionNotes(e.target.value)}
+                  onBlur={() => workout && workoutsApi.update(workout.id, { notes: sessionNotes || undefined }).catch(() => {})}
+                  placeholder="Session notes (optional)…"
+                  rows={2}
+                  className="w-full bg-bg-tertiary border border-border rounded-xl px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:ring-1 focus:ring-primary-700/50 mb-4"
+                />
                 {/* Header with timer + rest duration picker */}
                 <div className="flex items-center justify-between pb-4 flex-wrap gap-2">
                   <div>
@@ -557,8 +618,8 @@ export function WorkoutPage() {
                               </div>
 
                               {block.sets.map((set, setIdx) => (
+                                <div key={setIdx}>
                                 <motion.div
-                                  key={setIdx}
                                   layout
                                   animate={set.saved ? { backgroundColor: 'rgba(34,197,94,0.04)' } : { backgroundColor: 'rgba(20,20,40,1)' }}
                                   className={`grid grid-cols-[1fr_2fr_2fr_auto_auto] gap-2 items-center p-2 rounded-xl border transition-colors ${set.saved ? 'border-accent-green/15' : 'border-transparent bg-bg-tertiary'}`}
@@ -607,13 +668,45 @@ export function WorkoutPage() {
                                     <Check className="w-4 h-4" />
                                   </button>
 
-                                  <button
-                                    onClick={() => removeSet(blockIdx, setIdx)}
-                                    className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-accent-red transition-colors"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={() => updateSet(blockIdx, setIdx, 'showNotes', !set.showNotes)}
+                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary transition-colors"
+                                    >
+                                      <MessageSquare className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => removeSet(blockIdx, setIdx)}
+                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-accent-red transition-colors"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
                                 </motion.div>
+                                {/* RPE selector (per-set) */}
+                                {showRpe && (
+                                  <div className="flex items-center gap-1 flex-wrap pl-2 pb-1">
+                                    <span className="text-[10px] text-text-muted mr-1">RPE:</span>
+                                    {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                                      <button key={n}
+                                        onClick={() => updateSet(blockIdx, setIdx, 'rpe', set.rpe === n ? null : n)}
+                                        className={`w-6 h-6 rounded text-[10px] font-semibold transition-all ${set.rpe === n ? (n <= 4 ? 'bg-emerald-600 text-white' : n <= 7 ? 'bg-amber-500 text-white' : 'bg-red-600 text-white') : 'bg-bg-tertiary text-text-muted hover:bg-bg-hover'}`}>
+                                        {n}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                                {/* Per-set notes */}
+                                {set.showNotes && (
+                                  <input
+                                    type="text"
+                                    value={set.notes ?? ''}
+                                    onChange={e => updateSet(blockIdx, setIdx, 'notes', e.target.value)}
+                                    placeholder="Set notes…"
+                                    className="mx-2 mb-2 w-full bg-bg-secondary border border-border rounded-lg px-2 py-1 text-xs text-text-primary placeholder:text-text-muted focus:outline-none"
+                                  />
+                                )}
+                                </div>
                               ))}
 
                               <Button variant="ghost" size="sm" onClick={() => addSet(blockIdx)} className="w-full mt-1 border border-dashed border-border">

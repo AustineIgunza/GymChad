@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Dumbbell, UtensilsCrossed, BarChart2, Settings, ClipboardList, History } from 'lucide-react'
+import { Home, Dumbbell, UtensilsCrossed, BarChart2, Settings, ClipboardList, History, Calendar, Wrench } from 'lucide-react'
 import { clsx } from 'clsx'
 
 const navItems = [
@@ -9,6 +9,8 @@ const navItems = [
   { to: '/splits',    icon: ClipboardList,    label: 'Splits'    },
   { to: '/analytics', icon: BarChart2,        label: 'Analytics' },
   { to: '/history',   icon: History,          label: 'History'   },
+  { to: '/schedule',  icon: Calendar,         label: 'Schedule'  },
+  { to: '/tools',     icon: Wrench,           label: 'Tools'     },
   { to: '/settings',  icon: Settings,         label: 'Settings'  },
 ]
 

@@ -11,6 +11,7 @@ from app.schemas.nutrition import (
     NutritionLogCreate, NutritionLogUpdate, NutritionLogResponse,
     DailySummary, CustomFoodCreate, CustomFoodResponse
 )
+from app.services.nutrition_workout_intelligence import get_pre_workout_brief, get_post_workout_nutrition_push, get_daily_readiness_score
 
 router = APIRouter()
 
@@ -165,3 +166,33 @@ async def delete_custom_food(
         raise HTTPException(status_code=404, detail="Custom food not found")
     await db.delete(food)
     await db.commit()
+
+
+# ── Nutrition + Workout Intelligence (Feature 3) ──────────────────────────────
+
+@router.get("/pre-workout-brief")
+async def pre_workout_brief(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Nutrition check before starting a workout."""
+    return await get_pre_workout_brief(current_user.id, current_user, db)
+
+
+@router.get("/post-workout-push/{workout_id}")
+async def post_workout_push(
+    workout_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Personalized nutrition push after completing a workout."""
+    return await get_post_workout_nutrition_push(current_user.id, workout_id, current_user, db)
+
+
+@router.get("/readiness-score")
+async def readiness_score(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Today's training readiness score based on logged data."""
+    return await get_daily_readiness_score(current_user.id, current_user, db)

@@ -1,4 +1,6 @@
 // ── Enums ─────────────────────────────────────────────────────────────────────
+export type SetType = 'normal' | 'warmup' | 'dropset' | 'superset'
+
 export type Goal = 'CUTTING' | 'BULKING' | 'MAINTENANCE'
 export type Sex = 'male' | 'female'
 export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active'
@@ -91,6 +93,9 @@ export interface WorkoutSet {
   rpe: number | null
   is_warmup: boolean
   exercise?: Exercise
+  set_type?: SetType
+  superset_group?: number | null
+  notes?: string | null
 }
 
 export interface NutritionLog {
@@ -181,4 +186,55 @@ export interface AISession {
   user_id: string
   created_at: string
   messages: ChatMessage[]
+}
+
+export interface PersonalRecord {
+  id: string
+  user_id: string
+  exercise_id: string
+  exercise_name: string | null
+  weight_kg: number
+  reps: number
+  achieved_at: string
+  pr_type: 'weight' | 'volume' | 'reps'
+}
+
+export interface WorkoutSchedule {
+  id: string
+  user_id: string
+  split_id: string | null
+  split_day_id: string | null
+  split_name: string | null
+  split_day_label: string | null
+  scheduled_date: string
+  completed: boolean
+  notes: string | null
+}
+
+export interface WarmupSet {
+  set_number: number
+  pct: number
+  weight: number
+  reps: number
+  unit: string
+}
+
+export interface PlateResult {
+  target_weight: number
+  bar_weight: number
+  weight_per_side: number
+  plates_per_side: { weight: number; count: number }[]
+  unit: string
+  achievable: boolean
+  actual_weight: number
+}
+
+export interface OneRmResult {
+  weight: number
+  reps: number
+  epley: number
+  brzycki: number
+  lombardi: number
+  average: number
+  percentage_chart: { pct: number; weight: number; reps: number }[]
 }

@@ -12,6 +12,7 @@ from app.models.cardio import CardioSession
 from app.models.user import User
 from app.services.calorie_calculator import calculate_streak, projected_fat_loss
 from app.database import IS_SQLITE
+from app.services.recovery_engine import calculate_recovery_score, get_muscle_group_fatigue
 
 router = APIRouter()
 
@@ -271,3 +272,30 @@ async def get_macro_progress(
         "target_fat_g": current_user.fat_target,
         "target_calories": current_user.calorie_target,
     }
+
+
+# ── Recovery Engine (Feature 5) ───────────────────────────────────────────────
+
+@router.get("/recovery-score")
+async def recovery_score(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await calculate_recovery_score(current_user.id, current_user, db)
+
+
+@router.get("/muscle-fatigue")
+async def muscle_fatigue(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await get_muscle_group_fatigue(current_user.id, db)
+
+
+@router.get("/should-deload")
+async def should_deload(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    score_data = await calculate_recovery_score(current_user.id, current_user, db)
+    return {"should_deload": score_data["should_deload"], "reason": score_data["recommendation"]}

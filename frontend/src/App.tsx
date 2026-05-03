@@ -18,6 +18,9 @@ import { AnalyticsPage } from './pages/Analytics'
 import { SettingsPage } from './pages/Settings'
 import { SplitsPage } from './pages/Splits'
 import { HistoryPage } from './pages/History'
+import { SchedulePage } from './pages/Schedule'
+import { ToolsPage } from './pages/Tools'
+import { SharedSplitPage } from './pages/SharedSplit'
 
 const pageVariants = {
   initial: { opacity: 0, y: 10 },
@@ -128,6 +131,19 @@ function AppRoutes() {
             <AppShell><PageTransition><SettingsPage /></PageTransition></AppShell>
           </ProtectedRoute>
         } />
+        <Route path="/schedule" element={
+          <ProtectedRoute>
+            <AppShell><PageTransition><SchedulePage /></PageTransition></AppShell>
+          </ProtectedRoute>
+        } />
+        <Route path="/tools" element={
+          <ProtectedRoute>
+            <AppShell><PageTransition><ToolsPage /></PageTransition></AppShell>
+          </ProtectedRoute>
+        } />
+
+        {/* Public shared split route */}
+        <Route path="/splits/shared/:token" element={<SharedSplitPage />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

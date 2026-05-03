@@ -10,6 +10,10 @@ interface UIState {
   toasts: Toast[]
   addToast: (message: string, type?: Toast['type']) => void
   removeToast: (id: string) => void
+  theme: 'dark' | 'light'
+  showRpe: boolean
+  toggleTheme: () => void
+  toggleRpe: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -26,7 +30,28 @@ export const useUIStore = create<UIState>((set) => ({
 
   removeToast: (id) =>
     set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
+
+  theme: (localStorage.getItem('theme') ?? 'dark') as 'dark' | 'light',
+  showRpe: localStorage.getItem('showRpe') === 'true',
+
+  toggleTheme: () => set(s => {
+    const t = s.theme === 'dark' ? 'light' : 'dark'
+    localStorage.setItem('theme', t)
+    document.documentElement.classList.toggle('dark', t === 'dark')
+    document.documentElement.classList.toggle('light', t === 'light')
+    return { theme: t }
+  }),
+
+  toggleRpe: () => set(s => {
+    const v = !s.showRpe
+    localStorage.setItem('showRpe', String(v))
+    return { showRpe: v }
+  }),
 }))
+
+// Apply saved theme on module load
+const savedTheme = localStorage.getItem('theme') ?? 'dark'
+document.documentElement.classList.add(savedTheme)
 
 // Helper hook
 export const useToast = () => {

@@ -1,14 +1,6 @@
-"""
-routers/workouts.py — Workout CRUD + set management
+"""routers/workouts.py — Workout CRUD + set management"""
 
-Demonstrates key FastAPI patterns:
-- Path params: /workouts/{id}
-- Query params: /workouts?page=2&limit=10
-- Nested resources: /workouts/{id}/sets/{set_id}
-- selectinload for eager-loading relationships (avoids N+1 queries)
-"""
-
-from datetime import datetime, date, timezone
+from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
@@ -17,17 +9,41 @@ from app.dependencies import get_db, get_current_user
 from app.models.workout import Workout, WorkoutSet
 from app.models.exercise import Exercise
 from app.models.user import User
-from app.schemas.workout import WorkoutCreate, WorkoutUpdate, WorkoutResponse, WorkoutSetCreate, WorkoutSetUpdate, WorkoutSetResponse
+from app.schemas.workout import (
+    WorkoutCreate, WorkoutUpdate, WorkoutResponse,
+    WorkoutSetCreate, WorkoutSetUpdate, WorkoutSetResponse,
+)
 from app.services.progressive_overload import get_recommendation
+from app.services.pr_detection import check_and_save_pr
 
 router = APIRouter()
 
 
 def _set_to_dict(ws: WorkoutSet) -> dict:
-    """Convert a WorkoutSet ORM object to a dict including exercise name."""
     d = {c.name: getattr(ws, c.name) for c in ws.__table__.columns}
     if ws.exercise:
-        d["exercise"] = {"id": ws.exercise.id, "name": ws.exercise.name, "muscle_group": ws.exercise.muscle_group.value}
+        d["exercise"] = {
+            "id": ws.exercise.id,
+            "name": ws.exercise.name,
+            "muscle_group": ws.exercise.muscle_group.value,
+        }
+    d.setdefault("set_type", "normal")
+    d.setdefault("superset_group", None)
+    d.setdefault("is_pr", False)
+    return d
+
+
+def _set_to_dict_with_exercise(ws: WorkoutSet, exercise: Exercise | None) -> dict:
+    d = {c.name: getattr(ws, c.name) for c in ws.__table__.columns}
+    if exercise:
+        d["exercise"] = {
+            "id": exercise.id,
+            "name": exercise.name,
+            "muscle_group": exercise.muscle_group.value,
+        }
+    d.setdefault("set_type", "normal")
+    d.setdefault("superset_group", None)
+    d.setdefault("is_pr", False)
     return d
 
 
@@ -35,12 +51,12 @@ def _set_to_dict(ws: WorkoutSet) -> dict:
 async def get_workouts(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    days: int | None = Query(None),
     date_from: date | None = None,
     date_to: date | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Paginated workout history. Optional date range filter."""
     query = (
         select(Workout)
         .where(Workout.user_id == current_user.id)
@@ -49,6 +65,10 @@ async def get_workouts(
         .offset((page - 1) * limit)
         .limit(limit)
     )
+    if days is not None:
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        query = query.where(Workout.date >= cutoff)
     if date_from:
         query = query.where(Workout.date >= datetime.combine(date_from, datetime.min.time()))
     if date_to:
@@ -56,8 +76,6 @@ async def get_workouts(
 
     result = await db.execute(query)
     workouts = result.scalars().all()
-
-    # Serialize manually to include nested exercise info
     return [
         {**{c.name: getattr(w, c.name) for c in w.__table__.columns},
          "sets": [_set_to_dict(s) for s in w.sets]}
@@ -70,7 +88,6 @@ async def get_today_workouts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Returns all workouts logged today (based on UTC date)."""
     today = datetime.utcnow().date()
     result = await db.execute(
         select(Workout)
@@ -98,7 +115,6 @@ async def get_exercise_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Last N workout sessions for a specific exercise — used for progressive overload UI."""
     result = await db.execute(
         select(WorkoutSet)
         .join(Workout)
@@ -110,11 +126,10 @@ async def get_exercise_history(
         )
         .options(selectinload(WorkoutSet.workout))
         .order_by(Workout.date.desc())
-        .limit(sessions * 10)  # Fetch more to group into sessions
+        .limit(sessions * 10)
     )
     sets = result.scalars().all()
 
-    # Group sets by workout_id
     from collections import defaultdict
     sessions_map: dict[str, list] = defaultdict(list)
     workout_dates: dict[str, datetime] = {}
@@ -126,12 +141,11 @@ async def get_exercise_history(
             "weight_kg": s.weight_kg,
             "rpe": s.rpe,
             "is_warmup": s.is_warmup,
+            "set_type": getattr(s, "set_type", "normal"),
         })
         workout_dates[s.workout_id] = s.workout.date
 
-    # Sort by date desc
     sorted_sessions = sorted(sessions_map.items(), key=lambda x: workout_dates[x[0]], reverse=True)[:sessions]
-
     return [
         {"workout_id": wid, "date": workout_dates[wid].isoformat(), "sets": s}
         for wid, s in sorted_sessions
@@ -143,11 +157,8 @@ async def get_recommendations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Progressive overload recommendations for all exercises in the user's active split."""
     from app.models.split import Split, SplitDay, SplitDayExercise
-    from sqlalchemy.orm import selectinload
 
-    # Find active split
     split_result = await db.execute(
         select(Split)
         .where(and_(Split.user_id == current_user.id, Split.is_active == True))
@@ -160,7 +171,6 @@ async def get_recommendations(
     recommendations = []
     for day in active_split.days:
         for sde in day.exercises:
-            # Get last 3 sessions for this exercise
             hist_result = await db.execute(
                 select(WorkoutSet)
                 .join(Workout)
@@ -170,7 +180,6 @@ async def get_recommendations(
             )
             hist_sets = hist_result.scalars().all()
 
-            # Group into sessions
             from collections import defaultdict
             sess_map: dict[str, list] = defaultdict(list)
             for s in hist_sets:
@@ -201,7 +210,6 @@ async def get_workout(
     workout = result.scalar_one_or_none()
     if not workout:
         raise HTTPException(status_code=404, detail="Workout not found")
-
     return {**{c.name: getattr(workout, c.name) for c in workout.__table__.columns},
             "sets": [_set_to_dict(s) for s in workout.sets]}
 
@@ -238,10 +246,8 @@ async def update_workout(
     workout = result.scalar_one_or_none()
     if not workout:
         raise HTTPException(status_code=404, detail="Workout not found")
-
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(workout, field, value)
-
     await db.commit()
     await db.refresh(workout)
     return {**{c.name: getattr(workout, c.name) for c in workout.__table__.columns},
@@ -264,8 +270,6 @@ async def delete_workout(
     await db.commit()
 
 
-# ── Set endpoints ─────────────────────────────────────────────────────────────
-
 @router.post("/{workout_id}/sets", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def add_set(
     workout_id: str,
@@ -273,7 +277,6 @@ async def add_set(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Verify workout belongs to user
     result = await db.execute(
         select(Workout).where(and_(Workout.id == workout_id, Workout.user_id == current_user.id))
     )
@@ -285,16 +288,21 @@ async def add_set(
     await db.commit()
     await db.refresh(ws)
 
-    # Load exercise for response
+    # PR detection (non-blocking — runs after commit)
+    new_prs: list[str] = []
+    if not payload.is_warmup and payload.weight_kg > 0:
+        try:
+            new_prs = await check_and_save_pr(
+                db, current_user.id, payload.exercise_id, payload.weight_kg, payload.reps
+            )
+        except Exception:
+            pass  # PR detection failure should never break set logging
+
     exercise = await db.get(Exercise, ws.exercise_id)
-    return _set_to_dict_with_exercise(ws, exercise)
-
-
-def _set_to_dict_with_exercise(ws: WorkoutSet, exercise: Exercise | None) -> dict:
-    d = {c.name: getattr(ws, c.name) for c in ws.__table__.columns}
-    if exercise:
-        d["exercise"] = {"id": exercise.id, "name": exercise.name, "muscle_group": exercise.muscle_group.value}
-    return d
+    response = _set_to_dict_with_exercise(ws, exercise)
+    response["is_pr"] = len(new_prs) > 0
+    response["pr_types"] = new_prs
+    return response
 
 
 @router.put("/{workout_id}/sets/{set_id}", response_model=dict)
@@ -313,10 +321,8 @@ async def update_set(
     ws = result.scalar_one_or_none()
     if not ws:
         raise HTTPException(status_code=404, detail="Set not found")
-
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(ws, field, value)
-
     await db.commit()
     await db.refresh(ws)
     exercise = await db.get(Exercise, ws.exercise_id)
