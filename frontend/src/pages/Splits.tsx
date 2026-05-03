@@ -128,17 +128,18 @@ export function SplitsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [exSearch, setExSearch] = useState('')
-  const [exMuscleFilter, setExMuscleFilter] = useState<string>('All')
   const toast = useToast()
 
   // Shared form state (create / customize / edit)
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
 
-  interface DayExercise { exercise_id: string; sets: number; repsMin: number; repsMax: number }
-  interface DayState { label: string; exercises: DayExercise[] }
-  const [days, setDays] = useState<DayState[]>([{ label: 'Day 1', exercises: [] }])
+  // Sets/reps stored as strings so user can clear and retype freely
+  interface DayExercise { exercise_id: string; sets: string; repsMin: string; repsMax: string }
+  // search/muscleFilter per-day so they don't bleed across days
+  interface DayState { label: string; exercises: DayExercise[]; search: string; muscleFilter: string }
+  const blankDay = (n: number): DayState => ({ label: `Day ${n}`, exercises: [], search: '', muscleFilter: 'All' })
+  const [days, setDays] = useState<DayState[]>([blankDay(1)])
 
   useEffect(() => {
     Promise.all([
@@ -174,11 +175,11 @@ export function SplitsPage() {
     setDays(template.days.map((d) => ({
       label: d.label,
       exercises: pickExercisesForDay(exercises, d.muscles, 2).map(exId => ({
-        exercise_id: exId, sets: 3, repsMin: 8, repsMax: 12,
+        exercise_id: exId, sets: '3', repsMin: '8', repsMax: '12',
       })),
+      search: '',
+      muscleFilter: 'All',
     })))
-    setExSearch('')
-    setExMuscleFilter('All')
     setModalMode('template-customize')
   }
 
@@ -190,21 +191,20 @@ export function SplitsPage() {
       label: day.label,
       exercises: (day.exercises || []).map(sde => ({
         exercise_id: sde.exercise_id,
-        sets: sde.target_sets || 3,
-        repsMin: sde.target_reps_min || 8,
-        repsMax: sde.target_reps_max || 12,
+        sets: String(sde.target_sets ?? 3),
+        repsMin: String(sde.target_reps_min ?? 8),
+        repsMax: String(sde.target_reps_max ?? 12),
       })),
+      search: '',
+      muscleFilter: 'All',
     })))
-    setExSearch('')
-    setExMuscleFilter('All')
     setModalMode('edit')
   }
 
   const resetModal = () => {
     setModalMode(null)
     setEditingSplit(null)
-    setName(''); setDesc(''); setDays([{ label: 'Day 1', exercises: [] }])
-    setExSearch(''); setExMuscleFilter('All')
+    setName(''); setDesc(''); setDays([blankDay(1)])
   }
 
   const saveSplit = async () => {
@@ -219,9 +219,9 @@ export function SplitsPage() {
           exercises: d.exercises.map((ex, order) => ({
             exercise_id: ex.exercise_id,
             order,
-            target_sets: ex.sets,
-            target_reps_min: ex.repsMin,
-            target_reps_max: ex.repsMax,
+            target_sets: parseInt(ex.sets) || 3,
+            target_reps_min: parseInt(ex.repsMin) || 8,
+            target_reps_max: parseInt(ex.repsMax) || 12,
           })),
         })),
       }
@@ -246,7 +246,7 @@ export function SplitsPage() {
     }
   }
 
-  const addDay = () => setDays(d => [...d, { label: `Day ${d.length + 1}`, exercises: [] }])
+  const addDay = () => setDays(d => [...d, blankDay(d.length + 1)])
   const removeDay = (i: number) => setDays(d => d.filter((_, idx) => idx !== i))
   const toggleExercise = (dayIdx: number, exId: string) => {
     setDays(d => d.map((day, i) => {
@@ -256,15 +256,21 @@ export function SplitsPage() {
         ...day,
         exercises: exists
           ? day.exercises.filter(e => e.exercise_id !== exId)
-          : [...day.exercises, { exercise_id: exId, sets: 3, repsMin: 8, repsMax: 12 }],
+          : [...day.exercises, { exercise_id: exId, sets: '3', repsMin: '8', repsMax: '12' }],
       }
     }))
   }
-  const updateExercise = (dayIdx: number, exId: string, field: 'sets' | 'repsMin' | 'repsMax', val: number) => {
+  const updateExercise = (dayIdx: number, exId: string, field: 'sets' | 'repsMin' | 'repsMax', val: string) => {
     setDays(d => d.map((day, i) => i !== dayIdx ? day : {
       ...day,
       exercises: day.exercises.map(e => e.exercise_id === exId ? { ...e, [field]: val } : e),
     }))
+  }
+  const updateDaySearch = (dayIdx: number, search: string) => {
+    setDays(d => d.map((day, i) => i !== dayIdx ? day : { ...day, search }))
+  }
+  const updateDayMuscleFilter = (dayIdx: number, muscleFilter: string) => {
+    setDays(d => d.map((day, i) => i !== dayIdx ? day : { ...day, muscleFilter }))
   }
 
   return (
@@ -465,14 +471,14 @@ export function SplitsPage() {
                         <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted pointer-events-none" />
                         <input
                           placeholder="Search exercises..."
-                          value={exSearch}
-                          onChange={e => setExSearch(e.target.value)}
+                          value={day.search}
+                          onChange={e => updateDaySearch(dayIdx, e.target.value)}
                           className="w-full pl-6 pr-2 py-1.5 bg-bg-secondary border border-border rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary-700/50"
                         />
                       </div>
                       <select
-                        value={exMuscleFilter}
-                        onChange={e => setExMuscleFilter(e.target.value)}
+                        value={day.muscleFilter}
+                        onChange={e => updateDayMuscleFilter(dayIdx, e.target.value)}
                         className="bg-bg-secondary border border-border rounded-lg text-xs text-text-secondary px-2 py-1.5 focus:outline-none"
                       >
                         <option value="All">All</option>
@@ -484,8 +490,8 @@ export function SplitsPage() {
                     <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
                       {exercises
                         .filter(e => e.muscle_group !== 'CARDIO')
-                        .filter(e => exMuscleFilter === 'All' || e.muscle_group === exMuscleFilter)
-                        .filter(e => !exSearch || e.name.toLowerCase().includes(exSearch.toLowerCase()))
+                        .filter(e => day.muscleFilter === 'All' || e.muscle_group === day.muscleFilter)
+                        .filter(e => !day.search || e.name.toLowerCase().includes(day.search.toLowerCase()))
                         .map(ex => {
                           const selected = day.exercises.find(e => e.exercise_id === ex.id)
                           return (
@@ -511,7 +517,7 @@ export function SplitsPage() {
                             <input
                               type="number" min={1} max={10}
                               value={ex.sets}
-                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'sets', parseInt(e.target.value) || 3)}
+                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'sets', e.target.value)}
                               className="w-10 text-center text-xs bg-bg-secondary border border-border rounded-lg py-1 text-text-primary"
                               title="Sets"
                             />
@@ -519,7 +525,7 @@ export function SplitsPage() {
                             <input
                               type="number" min={1} max={30}
                               value={ex.repsMin}
-                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'repsMin', parseInt(e.target.value) || 8)}
+                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'repsMin', e.target.value)}
                               className="w-10 text-center text-xs bg-bg-secondary border border-border rounded-lg py-1 text-text-primary"
                               title="Min reps"
                             />
@@ -527,7 +533,7 @@ export function SplitsPage() {
                             <input
                               type="number" min={1} max={30}
                               value={ex.repsMax}
-                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'repsMax', parseInt(e.target.value) || 12)}
+                              onChange={e => updateExercise(dayIdx, ex.exercise_id, 'repsMax', e.target.value)}
                               className="w-10 text-center text-xs bg-bg-secondary border border-border rounded-lg py-1 text-text-primary"
                               title="Max reps"
                             />

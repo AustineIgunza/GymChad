@@ -88,10 +88,10 @@ export function Dashboard() {
   const totalSets = todayWorkouts.reduce((acc, w) => acc + (w.sets || []).filter(s => !s.is_warmup).length, 0)
   const musclesHit = [...new Set(todayWorkouts.flatMap(w => (w.sets || []).map(s => s.exercise?.muscle_group).filter(Boolean)))]
 
-  // Net calories = burned - eaten
+  // Net = eaten - burned. Negative = deficit (burning more than eating).
   const caloriesEaten = nutrition?.total_calories || 0
   const caloriesBurned = activity?.total_burned || 0
-  const netCalories = caloriesBurned - caloriesEaten
+  const netCalories = caloriesEaten - caloriesBurned
 
   const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.08 } } }
   const item = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
@@ -239,11 +239,11 @@ export function Dashboard() {
                   {/* Net calories bar */}
                   <div className="flex items-center justify-between p-2 rounded-xl bg-bg-tertiary">
                     <span className="text-xs text-text-muted">Net</span>
-                    <span className={`text-sm font-bold ${netCalories >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
-                      {netCalories >= 0 ? '+' : ''}{Math.round(netCalories)} kcal
+                    <span className={`text-sm font-bold ${netCalories <= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                      {netCalories > 0 ? '+' : ''}{Math.round(netCalories)} kcal
                     </span>
                     <span className="text-xs text-text-muted">
-                      {netCalories >= 300 ? '📉 Deficit' : netCalories <= -300 ? '🔥 Surplus' : '⚖️ Maintenance'}
+                      {netCalories <= -300 ? '📉 Deficit' : netCalories >= 300 ? '🔥 Surplus' : '⚖️ Maintenance'}
                     </span>
                   </div>
                 </div>
