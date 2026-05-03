@@ -67,11 +67,79 @@
 
 /* ── Superman animated background ─────────────────────────────────── */
 .bg-animated {
-  background:
-    radial-gradient(ellipse at 15% 50%, rgba(220,38,38,0.10) 0%, transparent 55%),
-    radial-gradient(ellipse at 85% 20%, rgba(29,78,216,0.10) 0%, transparent 55%),
-    radial-gradient(ellipse at 50% 90%, rgba(220,38,38,0.05) 0%, transparent 45%),
-    #07070f;
+  background: #07070f;
+  position: relative;
+}
+
+/* Floating orbs */
+.bg-orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.bg-orb-1 {
+  width: 60vw; height: 60vw; max-width: 700px; max-height: 700px;
+  background: radial-gradient(circle, rgba(220,38,38,0.18) 0%, transparent 70%);
+  top: -10%; left: -10%;
+  animation: orbFloat1 14s ease-in-out infinite;
+}
+.bg-orb-2 {
+  width: 55vw; height: 55vw; max-width: 650px; max-height: 650px;
+  background: radial-gradient(circle, rgba(29,78,216,0.18) 0%, transparent 70%);
+  bottom: -10%; right: -10%;
+  animation: orbFloat2 18s ease-in-out infinite;
+}
+.bg-orb-3 {
+  width: 40vw; height: 40vw; max-width: 500px; max-height: 500px;
+  background: radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%);
+  top: 40%; left: 40%;
+  animation: orbFloat3 11s ease-in-out infinite;
+}
+
+@keyframes orbFloat1 {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 1; }
+  25%       { transform: translate(6vw, 4vh)  scale(1.08); opacity: 0.85; }
+  50%       { transform: translate(2vw, 9vh)  scale(0.95); opacity: 1; }
+  75%       { transform: translate(-3vw, 3vh) scale(1.05); opacity: 0.9; }
+}
+@keyframes orbFloat2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  30%       { transform: translate(-5vw, -6vh) scale(1.1); }
+  60%       { transform: translate(3vw, -3vh)  scale(0.92); }
+}
+@keyframes orbFloat3 {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.7; }
+  50%       { transform: translate(-50%, -50%) scale(1.4); opacity: 0.3; }
+}
+
+/* Subtle grid overlay */
+.bg-grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(ellipse at 50% 50%, black 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, black 40%, transparent 100%);
+}
+
+/* Floating particles */
+.bg-particle {
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: particleDrift linear infinite;
+  will-change: transform, opacity;
+}
+@keyframes particleDrift {
+  0%   { transform: translateY(105vh) translateX(0);    opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 0.6; }
+  100% { transform: translateY(-10vh) translateX(20px); opacity: 0; }
 }
 
 /* ── Bottom nav blur ───────────────────────────────────────────────── */

@@ -5,6 +5,7 @@ import { useAuthStore } from './stores/authStore'
 import { BottomNav } from './components/ui/BottomNav'
 import { SideNav } from './components/ui/SideNav'
 import { ToastContainer } from './components/ui/Toast'
+import { AnimatedBackground } from './components/ui/AnimatedBackground'
 
 // Pages
 import { Login } from './pages/auth/Login'
@@ -142,9 +143,12 @@ export default function App() {
   }, [initialize])
 
   return (
-    <div className="bg-animated min-h-screen">
-      <ToastContainer />
-      <AppRoutes />
+    <div className="bg-animated min-h-screen relative">
+      <AnimatedBackground />
+      <div className="relative" style={{ zIndex: 1 }}>
+        <ToastContainer />
+        <AppRoutes />
+      </div>
     </div>
   )
 }

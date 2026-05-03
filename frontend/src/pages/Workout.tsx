@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Minus, X, Check, ChevronDown, ChevronUp, Search, Timer, Dumbbell, Bike, Trash2 } from 'lucide-react'
+import { Plus, Minus, X, Check, ChevronDown, ChevronUp, Search, Timer, Dumbbell, Bike, Trash2, Bell, SkipForward } from 'lucide-react'
 import { workoutsApi } from '../services/workouts'
 import { exercisesApi } from '../services/exercises'
 import { splitsApi } from '../services/splits'
@@ -34,33 +34,30 @@ interface ExerciseBlock {
 
 const CARDIO_TYPES: { value: CardioType; label: string; icon: string }[] = [
   { value: 'recumbent_bike', label: 'Recumbent Bike', icon: '🚲' },
-  { value: 'upright_bike', label: 'Upright Bike', icon: '🚴' },
-  { value: 'spinning', label: 'Spinning', icon: '⚡' },
-  { value: 'treadmill', label: 'Treadmill', icon: '🏃' },
-  { value: 'elliptical', label: 'Elliptical', icon: '🔄' },
-  { value: 'rowing', label: 'Rowing Machine', icon: '🚣' },
-  { value: 'stairmaster', label: 'Stairmaster', icon: '🪜' },
-  { value: 'walking', label: 'Walking', icon: '🚶' },
-  { value: 'hiking', label: 'Hiking', icon: '⛰️' },
-  { value: 'jump_rope', label: 'Jump Rope', icon: '🪢' },
-  { value: 'battle_ropes', label: 'Battle Ropes', icon: '💪' },
-  { value: 'swimming', label: 'Swimming', icon: '🏊' },
-  { value: 'hiit', label: 'HIIT', icon: '🔥' },
-  { value: 'other', label: 'Other', icon: '🏃' },
+  { value: 'upright_bike',   label: 'Upright Bike',   icon: '🚴' },
+  { value: 'spinning',       label: 'Spinning',        icon: '⚡' },
+  { value: 'treadmill',      label: 'Treadmill',       icon: '🏃' },
+  { value: 'elliptical',     label: 'Elliptical',      icon: '🔄' },
+  { value: 'rowing',         label: 'Rowing Machine',  icon: '🚣' },
+  { value: 'stairmaster',    label: 'Stairmaster',     icon: '🪜' },
+  { value: 'walking',        label: 'Walking',         icon: '🚶' },
+  { value: 'hiking',         label: 'Hiking',          icon: '⛰️' },
+  { value: 'jump_rope',      label: 'Jump Rope',       icon: '🪢' },
+  { value: 'battle_ropes',   label: 'Battle Ropes',    icon: '💪' },
+  { value: 'swimming',       label: 'Swimming',        icon: '🏊' },
+  { value: 'hiit',           label: 'HIIT',            icon: '🔥' },
+  { value: 'other',          label: 'Other',           icon: '🏃' },
 ]
 
-// Which cardio types use level
 const USE_LEVEL: CardioType[] = ['recumbent_bike', 'upright_bike', 'spinning', 'elliptical', 'rowing', 'stairmaster']
-// Which use speed + incline
 const USE_SPEED: CardioType[] = ['treadmill', 'walking']
-// Which use RPM
-const USE_RPM: CardioType[] = ['recumbent_bike', 'upright_bike', 'spinning']
+const USE_RPM:   CardioType[] = ['recumbent_bike', 'upright_bike', 'spinning']
 
 interface CardioForm {
   cardio_type: CardioType
   duration_min: string
   level: string
-  rpm: string
+  rpm: string        // stored as string to allow ranges like "60-80"
   speed_kmh: string
   incline_pct: string
   notes: string
@@ -76,6 +73,39 @@ const defaultCardioForm: CardioForm = {
   notes: '',
 }
 
+const REST_PRESETS = [60, 90, 120, 150, 180]
+
+// Detect which split day to train next based on recent workout labels
+function detectNextSplitDay(recentWorkouts: Workout[], split: Split): number {
+  const sortedDays = [...split.days].sort((a, b) => a.day_number - b.day_number)
+  // Walk recent workouts newest-first to find last trained day
+  for (const wo of recentWorkouts) {
+    const label = wo.label || ''
+    for (let i = 0; i < sortedDays.length; i++) {
+      if (sortedDays[i].label && label.includes(sortedDays[i].label)) {
+        return (i + 1) % sortedDays.length
+      }
+    }
+  }
+  return 0 // default to day 1
+}
+
+// Beep using Web Audio API
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.frequency.value = 880
+    gain.gain.setValueAtTime(0.3, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
+    osc.start(ctx.currentTime)
+    osc.stop(ctx.currentTime + 0.4)
+  } catch { /* ignore */ }
+}
+
 export function WorkoutPage() {
   const [tab, setTab] = useState<'lift' | 'cardio'>('lift')
   const [workout, setWorkout] = useState<Workout | null>(null)
@@ -83,14 +113,19 @@ export function WorkoutPage() {
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [search, setSearch] = useState('')
   const [pickModal, setPickModal] = useState(false)
+  const [muscleFilter, setMuscleFilter] = useState('All')
   const [timer, setTimer] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
   const [loading, setLoading] = useState(false)
   const [activeSplit, setActiveSplit] = useState<Split | null>(null)
-  const [splitDayModal, setSplitDayModal] = useState(false)
+  const [recentWorkouts, setRecentWorkouts] = useState<Workout[]>([])
+  // Rest timer
+  const [restSeconds, setRestSeconds] = useState<number | null>(null)
+  const [restDuration, setRestDuration] = useState(90)
+  const restRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toast = useToast()
 
-  // Cardio state
+  // Cardio
   const [cardioForm, setCardioForm] = useState<CardioForm>(defaultCardioForm)
   const [savingCardio, setSavingCardio] = useState(false)
   const [cardioSessions, setCardioSessions] = useState<CardioSession[]>([])
@@ -98,7 +133,7 @@ export function WorkoutPage() {
 
   const today = new Date().toISOString().split('T')[0]
 
-  // Timer
+  // Workout timer
   useEffect(() => {
     if (!timerRunning) return
     const id = setInterval(() => setTimer(t => t + 1), 1000)
@@ -107,22 +142,49 @@ export function WorkoutPage() {
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
+  // Request notification permission & fetch data on mount
   useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
     exercisesApi.list().then(setExercises).catch(() => {})
     splitsApi.list().then(splits => {
       const active = splits.find(s => s.is_active) || null
       setActiveSplit(active)
     }).catch(() => {})
+    // Fetch recent workouts to detect which split day is next
+    api.get('/workouts', { params: { days: 14 } })
+      .then(r => setRecentWorkouts(Array.isArray(r.data) ? r.data : r.data?.workouts || []))
+      .catch(() => {})
   }, [])
+
+  // Rest timer countdown
+  useEffect(() => {
+    if (restSeconds === null) return
+    if (restSeconds <= 0) {
+      setRestSeconds(null)
+      playBeep()
+      if (Notification.permission === 'granted') {
+        new Notification('Rest over! 💪', { body: 'Time for your next set', icon: '/favicon.ico' })
+      }
+      return
+    }
+    const id = setTimeout(() => setRestSeconds(s => (s !== null ? s - 1 : null)), 1000)
+    restRef.current = id
+    return () => clearTimeout(id)
+  }, [restSeconds])
+
+  const stopRest = () => {
+    if (restRef.current) clearTimeout(restRef.current)
+    setRestSeconds(null)
+  }
 
   const fetchCardioSessions = useCallback(async () => {
     setCardioLoading(true)
     try {
       const r = await api.get('/cardio', { params: { days: 1 } })
       setCardioSessions(r.data)
-    } catch {
-      // ignore
-    } finally {
+    } catch { /* ignore */ } finally {
       setCardioLoading(false)
     }
   }, [])
@@ -136,23 +198,15 @@ export function WorkoutPage() {
 
   const logCardio = async () => {
     const duration = parseFloat(cardioForm.duration_min)
-    if (!duration || duration <= 0) {
-      toast.error('Please enter a valid duration')
-      return
-    }
+    if (!duration || duration <= 0) { toast.error('Please enter a valid duration'); return }
     setSavingCardio(true)
     try {
-      const payload: any = {
-        date: today,
-        cardio_type: cardioForm.cardio_type,
-        duration_min: duration,
-      }
+      const payload: any = { date: today, cardio_type: cardioForm.cardio_type, duration_min: duration }
       if (cardioForm.level) payload.level = parseInt(cardioForm.level)
       if (cardioForm.rpm) payload.rpm = parseFloat(cardioForm.rpm)
       if (cardioForm.speed_kmh) payload.speed_kmh = parseFloat(cardioForm.speed_kmh)
       if (cardioForm.incline_pct) payload.incline_pct = parseFloat(cardioForm.incline_pct)
       if (cardioForm.notes) payload.notes = cardioForm.notes
-
       await api.post('/cardio', payload)
       setCardioForm(defaultCardioForm)
       await fetchCardioSessions()
@@ -168,26 +222,28 @@ export function WorkoutPage() {
     try {
       await api.delete(`/cardio/${id}`)
       setCardioSessions(s => s.filter(c => c.id !== id))
-      toast.success('Removed')
-    } catch {
-      toast.error('Failed to remove')
-    }
+    } catch { toast.error('Failed to remove') }
   }
 
-  const startWorkout = () => {
+  // Auto-detect next split day from workout history, then begin
+  const startWorkout = async () => {
     if (activeSplit) {
-      setSplitDayModal(true)
+      const sortedDays = [...activeSplit.days].sort((a, b) => a.day_number - b.day_number)
+      const nextIdx = detectNextSplitDay(recentWorkouts, activeSplit)
+      const dayLabel = sortedDays[nextIdx]?.label || `Day ${nextIdx + 1}`
+      toast.success(`Starting ${activeSplit.name} — ${dayLabel}`)
+      await beginWorkout(nextIdx)
     } else {
-      beginWorkout(null)
+      await beginWorkout(null)
     }
   }
 
   const beginWorkout = async (splitDayIdx: number | null) => {
-    setSplitDayModal(false)
     setLoading(true)
     try {
+      const sortedDays = activeSplit ? [...activeSplit.days].sort((a, b) => a.day_number - b.day_number) : []
       const dayLabel = splitDayIdx !== null && activeSplit
-        ? `${activeSplit.days[splitDayIdx]?.label} — ${new Date().toLocaleDateString()}`
+        ? `${sortedDays[splitDayIdx]?.label} — ${new Date().toLocaleDateString()}`
         : `Workout — ${new Date().toLocaleDateString()}`
       const w = await workoutsApi.create({ label: dayLabel })
       setWorkout(w)
@@ -195,7 +251,7 @@ export function WorkoutPage() {
 
       // Auto-populate exercises from the chosen split day
       if (splitDayIdx !== null && activeSplit) {
-        const splitDay = activeSplit.days[splitDayIdx]
+        const splitDay = sortedDays[splitDayIdx]
         if (splitDay?.exercises?.length) {
           const newBlocks: ExerciseBlock[] = splitDay.exercises
             .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
@@ -221,7 +277,6 @@ export function WorkoutPage() {
             })
             .filter(Boolean) as ExerciseBlock[]
           setBlocks(newBlocks)
-
           // Fetch prev bests in background
           newBlocks.forEach((block, bi) => {
             workoutsApi.exerciseHistory(block.exercise.id, 1).then(hist => {
@@ -233,8 +288,6 @@ export function WorkoutPage() {
           })
         }
       }
-
-      toast.success('Workout started!')
     } catch {
       toast.error('Failed to start workout')
     } finally {
@@ -244,8 +297,7 @@ export function WorkoutPage() {
 
   const addExercise = (ex: Exercise) => {
     setBlocks(b => [...b, {
-      exercise: ex,
-      expanded: true,
+      exercise: ex, expanded: true,
       sets: [{ exercise_id: ex.id, exercise_name: ex.name, set_number: 1, reps: 8, weight_kg: 0, is_warmup: false, saved: false }],
       prevBest: null,
     }])
@@ -253,7 +305,7 @@ export function WorkoutPage() {
     workoutsApi.exerciseHistory(ex.id, 1).then(hist => {
       if (hist[0]?.sets?.length) {
         const best = hist[0].sets.reduce((a: any, b: any) => b.weight_kg > a.weight_kg ? b : a, hist[0].sets[0])
-        setBlocks(blocks => blocks.map(bl => bl.exercise.id === ex.id ? { ...bl, prevBest: best } : bl))
+        setBlocks(bls => bls.map(bl => bl.exercise.id === ex.id ? { ...bl, prevBest: best } : bl))
       }
     }).catch(() => {})
   }
@@ -314,6 +366,8 @@ export function WorkoutPage() {
         next[blockIdx].sets[setIdx] = { ...s, id: saved.id, saved: true }
         return next
       })
+      // Start rest timer after saving a working set
+      if (!s.is_warmup) setRestSeconds(restDuration)
     } catch {
       toast.error('Failed to save set')
     }
@@ -321,17 +375,20 @@ export function WorkoutPage() {
 
   const finishWorkout = async () => {
     if (!workout) return
+    stopRest()
     setTimerRunning(false)
     await workoutsApi.update(workout.id, { duration_min: Math.floor(timer / 60) })
-    toast.success(`Workout finished! ${formatTime(timer)} ⚡`)
+    toast.success(`Workout done! ${formatTime(timer)} ⚡`)
     setWorkout(null)
     setBlocks([])
     setTimer(0)
   }
 
-  const filteredExercises = exercises.filter(e =>
-    e.name.toLowerCase().includes(search.toLowerCase())
-  )
+  // Group exercises for picker
+  const muscleGroups = ['All', ...Array.from(new Set(exercises.map(e => e.muscle_group))).sort()]
+  const filteredExercises = exercises
+    .filter(e => muscleFilter === 'All' || e.muscle_group === muscleFilter)
+    .filter(e => e.name.toLowerCase().includes(search.toLowerCase()))
   const grouped = filteredExercises.reduce((acc, ex) => {
     if (!acc[ex.muscle_group]) acc[ex.muscle_group] = []
     acc[ex.muscle_group].push(ex)
@@ -341,9 +398,12 @@ export function WorkoutPage() {
   const currentType = cardioForm.cardio_type
   const showLevel = USE_LEVEL.includes(currentType)
   const showSpeed = USE_SPEED.includes(currentType)
-  const showRpm = USE_RPM.includes(currentType)
-
+  const showRpm   = USE_RPM.includes(currentType)
   const cardioLabel = CARDIO_TYPES.find(c => c.value === cardioForm.cardio_type)
+
+  // Rest timer progress (0→1)
+  const restProgress = restSeconds !== null ? restSeconds / restDuration : 0
+  const restCircumference = 2 * Math.PI * 22
 
   return (
     <div className="page px-4">
@@ -352,81 +412,124 @@ export function WorkoutPage() {
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-bg-tertiary rounded-2xl mb-4">
         {[
-          { id: 'lift', icon: <Dumbbell className="w-4 h-4" />, label: 'Lift' },
-          { id: 'cardio', icon: <Bike className="w-4 h-4" />, label: 'Cardio' },
+          { id: 'lift',   icon: <Dumbbell className="w-4 h-4" />, label: 'Lift'   },
+          { id: 'cardio', icon: <Bike className="w-4 h-4" />,     label: 'Cardio' },
         ].map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id as any)}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-              tab === t.id
-                ? 'bg-bg-primary text-text-primary shadow-sm'
-                : 'text-text-muted hover:text-text-secondary'
-            }`}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium transition-all ${tab === t.id ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'}`}
           >
             {t.icon}{t.label}
           </button>
         ))}
       </div>
 
-      {/* ── LIFT TAB ── */}
       <AnimatePresence mode="wait">
+        {/* ── LIFT TAB ── */}
         {tab === 'lift' && (
           <motion.div key="lift" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             {!workout ? (
               <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-6 gap-6">
-                <motion.div
-                  animate={{ y: [0, -8, 0] }}
-                  transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                >
+                <motion.div animate={{ y: [0, -8, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}>
                   <div className="w-24 h-24 rounded-3xl bg-primary-700/20 flex items-center justify-center">
                     <Dumbbell className="w-12 h-12 text-primary-400" />
                   </div>
                 </motion.div>
                 <div>
-                  <h2 className="text-xl font-bold text-text-primary mb-2">Ready to train?</h2>
-                  <p className="text-text-muted text-sm">Start a new workout session and log your sets in real-time.</p>
+                  <h2 className="text-xl font-bold text-text-primary mb-1">Ready to train?</h2>
+                  {activeSplit && (
+                    <p className="text-text-muted text-sm">
+                      Active split: <span className="text-primary-400 font-medium">{activeSplit.name}</span>
+                    </p>
+                  )}
                 </div>
                 <Button size="lg" loading={loading} onClick={startWorkout} className="w-full max-w-xs">
-                  <Plus className="w-5 h-5" />
-                  Start Workout
+                  <Plus className="w-5 h-5" /> Start Workout
                 </Button>
               </div>
             ) : (
               <>
-                {/* Header with timer */}
-                <div className="flex items-center justify-between pb-4">
+                {/* Header with timer + rest duration picker */}
+                <div className="flex items-center justify-between pb-4 flex-wrap gap-2">
                   <div>
                     <h2 className="text-base font-bold text-text-primary">{workout.label}</h2>
                     <p className="text-text-muted text-xs">{blocks.reduce((a, b) => a + b.sets.filter(s => s.saved).length, 0)} sets logged</p>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    {/* Rest duration picker */}
+                    <div className="flex items-center gap-1 p-1 bg-bg-tertiary rounded-xl">
+                      <Bell className="w-3 h-3 text-text-muted ml-1" />
+                      {REST_PRESETS.map(sec => (
+                        <button
+                          key={sec}
+                          onClick={() => setRestDuration(sec)}
+                          className={`px-2 py-1 rounded-lg text-xs font-medium transition-all ${restDuration === sec ? 'bg-primary-700 text-white' : 'text-text-muted hover:text-text-secondary'}`}
+                        >
+                          {sec}s
+                        </button>
+                      ))}
+                    </div>
+                    {/* Workout timer */}
                     <motion.button
                       onClick={() => setTimerRunning(r => !r)}
-                      animate={timerRunning ? {
-                        boxShadow: ['0 0 0px rgba(220,38,38,0)', '0 0 12px rgba(220,38,38,0.4)', '0 0 0px rgba(220,38,38,0)'],
-                      } : { boxShadow: '0 0 0px rgba(220,38,38,0)' }}
+                      animate={timerRunning ? { boxShadow: ['0 0 0px rgba(220,38,38,0)', '0 0 12px rgba(220,38,38,0.4)', '0 0 0px rgba(220,38,38,0)'] } : {}}
                       transition={{ duration: 1.5, repeat: timerRunning ? Infinity : 0 }}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg-tertiary border border-border text-sm font-mono"
                     >
-                      <motion.div
-                        animate={timerRunning ? { scale: [1, 1.2, 1] } : { scale: 1 }}
-                        transition={{ duration: 1, repeat: timerRunning ? Infinity : 0 }}
-                      >
-                        <Timer className={`w-3.5 h-3.5 ${timerRunning ? 'text-primary-400' : 'text-text-muted'}`} />
-                      </motion.div>
+                      <Timer className={`w-3.5 h-3.5 ${timerRunning ? 'text-primary-400' : 'text-text-muted'}`} />
                       <span className={timerRunning ? 'text-text-primary' : 'text-text-muted'}>{formatTime(timer)}</span>
                     </motion.button>
                     <Button variant="danger" size="sm" onClick={finishWorkout}>Done</Button>
                   </div>
                 </div>
 
+                {/* REST TIMER WIDGET */}
+                <AnimatePresence>
+                  {restSeconds !== null && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.97 }}
+                      className="mb-4 p-4 rounded-2xl bg-bg-card border border-primary-700/30 flex items-center gap-4"
+                    >
+                      {/* Countdown ring */}
+                      <div className="relative flex-shrink-0 w-14 h-14">
+                        <svg className="w-14 h-14 -rotate-90" viewBox="0 0 48 48">
+                          <circle cx="24" cy="24" r="22" fill="none" stroke="rgba(220,38,38,0.15)" strokeWidth="3" />
+                          <circle
+                            cx="24" cy="24" r="22" fill="none"
+                            stroke="#dc2626" strokeWidth="3"
+                            strokeDasharray={restCircumference}
+                            strokeDashoffset={restCircumference * (1 - restProgress)}
+                            strokeLinecap="round"
+                            style={{ transition: 'stroke-dashoffset 1s linear' }}
+                          />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <span className="text-sm font-bold font-mono text-text-primary">{formatTime(restSeconds)}</span>
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-text-primary text-sm">Rest time</p>
+                        <p className="text-xs text-text-muted">Get ready for your next set</p>
+                      </div>
+                      <button
+                        onClick={stopRest}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-bg-tertiary text-text-muted hover:text-text-primary text-xs font-medium transition-colors"
+                      >
+                        <SkipForward className="w-3.5 h-3.5" /> Skip
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* Exercise blocks */}
                 <div className="space-y-3">
                   <AnimatePresence>
                     {blocks.map((block, blockIdx) => (
                       <motion.div
-                        key={block.exercise.id}
+                        key={block.exercise.id + blockIdx}
                         initial={{ opacity: 0, y: 12 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
@@ -450,7 +553,7 @@ export function WorkoutPage() {
                           {block.expanded && (
                             <div className="px-4 pb-4 space-y-2">
                               <div className="grid grid-cols-[1fr_2fr_2fr_auto_auto] gap-2 text-xs text-text-muted px-1 mb-1">
-                                <span>Set</span><span>Weight kg</span><span>Reps</span><span></span><span></span>
+                                <span>Set</span><span>Weight (kg)</span><span>Reps</span><span></span><span></span>
                               </div>
 
                               {block.sets.map((set, setIdx) => (
@@ -458,7 +561,8 @@ export function WorkoutPage() {
                                   key={setIdx}
                                   layout
                                   animate={set.saved ? { backgroundColor: 'rgba(34,197,94,0.04)' } : { backgroundColor: 'rgba(20,20,40,1)' }}
-                                  className={`grid grid-cols-[1fr_2fr_2fr_auto_auto] gap-2 items-center p-2 rounded-xl border transition-colors ${set.saved ? 'border-accent-green/15' : 'border-transparent bg-bg-tertiary'}`}>
+                                  className={`grid grid-cols-[1fr_2fr_2fr_auto_auto] gap-2 items-center p-2 rounded-xl border transition-colors ${set.saved ? 'border-accent-green/15' : 'border-transparent bg-bg-tertiary'}`}
+                                >
                                   <button
                                     onClick={() => updateSet(blockIdx, setIdx, 'is_warmup', !set.is_warmup)}
                                     className={`text-xs font-bold text-center w-7 h-7 rounded-lg flex items-center justify-center mx-auto transition-colors ${set.is_warmup ? 'bg-accent-yellow/15 text-accent-yellow' : 'text-text-secondary hover:bg-bg-hover'}`}
@@ -534,15 +638,13 @@ export function WorkoutPage() {
         {/* ── CARDIO TAB ── */}
         {tab === 'cardio' && (
           <motion.div key="cardio" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
-
-            {/* Log Cardio Form */}
             <Card padding="md">
               <h3 className="font-semibold text-text-primary mb-4">Log Cardio Session</h3>
 
               {/* Cardio type picker */}
               <div className="mb-4">
                 <p className="text-xs text-text-muted mb-2">Type</p>
-                <div className="grid grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-4 md:grid-cols-7 gap-1.5">
                   {CARDIO_TYPES.map(ct => (
                     <button
                       key={ct.value}
@@ -560,18 +662,11 @@ export function WorkoutPage() {
                 </div>
               </div>
 
-              {/* Duration */}
               <div className="mb-3">
-                <Input
-                  label="Duration (minutes)"
-                  type="number"
-                  placeholder="30"
-                  value={cardioForm.duration_min}
-                  onChange={e => setCardio('duration_min', e.target.value)}
-                />
+                <Input label="Duration (minutes)" type="number" placeholder="30"
+                  value={cardioForm.duration_min} onChange={e => setCardio('duration_min', e.target.value)} />
               </div>
 
-              {/* Type-specific fields */}
               <div className="space-y-3 mb-4">
                 {showLevel && (
                   <div>
@@ -581,11 +676,7 @@ export function WorkoutPage() {
                         <button
                           key={lvl}
                           onClick={() => setCardio('level', cardioForm.level === String(lvl) ? '' : String(lvl))}
-                          className={`h-8 rounded-lg text-xs font-semibold transition-colors ${
-                            cardioForm.level === String(lvl)
-                              ? 'bg-primary-700 text-white'
-                              : 'bg-bg-tertiary text-text-muted hover:bg-bg-hover'
-                          }`}
+                          className={`h-8 rounded-lg text-xs font-semibold transition-colors ${cardioForm.level === String(lvl) ? 'bg-primary-700 text-white' : 'bg-bg-tertiary text-text-muted hover:bg-bg-hover'}`}
                         >
                           {lvl}
                         </button>
@@ -595,31 +686,25 @@ export function WorkoutPage() {
                 )}
 
                 {showRpm && (
-                  <Input
-                    label="RPM (optional)"
-                    type="number"
-                    placeholder="80"
-                    value={cardioForm.rpm}
-                    onChange={e => setCardio('rpm', e.target.value)}
-                  />
+                  <div>
+                    <label className="text-xs font-medium text-text-secondary block mb-1">RPM (optional — can use range e.g. "60-80")</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="80  or  60-80"
+                      value={cardioForm.rpm}
+                      onChange={e => setCardio('rpm', e.target.value)}
+                      className="w-full px-3 py-2 bg-bg-tertiary border border-border rounded-xl text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary-700/50"
+                    />
+                  </div>
                 )}
 
                 {showSpeed && (
                   <div className="grid grid-cols-2 gap-3">
-                    <Input
-                      label="Speed (km/h)"
-                      type="number"
-                      placeholder="6.5"
-                      value={cardioForm.speed_kmh}
-                      onChange={e => setCardio('speed_kmh', e.target.value)}
-                    />
-                    <Input
-                      label="Incline (%)"
-                      type="number"
-                      placeholder="0"
-                      value={cardioForm.incline_pct}
-                      onChange={e => setCardio('incline_pct', e.target.value)}
-                    />
+                    <Input label="Speed (km/h)" type="number" placeholder="6.5"
+                      value={cardioForm.speed_kmh} onChange={e => setCardio('speed_kmh', e.target.value)} />
+                    <Input label="Incline (%)" type="number" placeholder="0"
+                      value={cardioForm.incline_pct} onChange={e => setCardio('incline_pct', e.target.value)} />
                   </div>
                 )}
               </div>
@@ -633,13 +718,10 @@ export function WorkoutPage() {
             <div>
               <h3 className="font-semibold text-text-primary mb-3">Today's Cardio</h3>
               {cardioLoading ? (
-                <div className="space-y-2">
-                  {[1, 2].map(i => <div key={i} className="skeleton h-16 rounded-2xl" />)}
-                </div>
+                <div className="space-y-2">{[1, 2].map(i => <div key={i} className="skeleton h-16 rounded-2xl" />)}</div>
               ) : cardioSessions.length === 0 ? (
                 <div className="text-center py-10 text-text-muted text-sm">
-                  <span className="text-3xl block mb-2">🚴</span>
-                  No cardio logged today
+                  <span className="text-3xl block mb-2">🚴</span>No cardio logged today
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -665,14 +747,9 @@ export function WorkoutPage() {
                               </div>
                               <div className="flex items-center gap-3">
                                 {session.calories_burned && (
-                                  <span className="text-sm font-bold text-accent-orange">
-                                    ~{Math.round(session.calories_burned)} kcal
-                                  </span>
+                                  <span className="text-sm font-bold text-accent-orange">~{Math.round(session.calories_burned)} kcal</span>
                                 )}
-                                <button
-                                  onClick={() => deleteCardio(session.id)}
-                                  className="w-7 h-7 flex items-center justify-center text-text-muted hover:text-accent-red transition-colors"
-                                >
+                                <button onClick={() => deleteCardio(session.id)} className="w-7 h-7 flex items-center justify-center text-text-muted hover:text-accent-red transition-colors">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
@@ -689,51 +766,29 @@ export function WorkoutPage() {
         )}
       </AnimatePresence>
 
-      {/* Split day picker modal */}
-      {activeSplit && (
-        <Modal open={splitDayModal} onClose={() => setSplitDayModal(false)} title={`Start: ${activeSplit.name}`}>
-          <p className="text-sm text-text-muted mb-4">Choose which day to train today:</p>
-          <div className="space-y-2">
-            {activeSplit.days
-              .sort((a, b) => a.day_number - b.day_number)
-              .map((day, idx) => (
-                <button
-                  key={day.id}
-                  onClick={() => beginWorkout(idx)}
-                  className="w-full text-left p-4 rounded-2xl bg-bg-tertiary hover:bg-bg-hover border border-border transition-colors"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="font-semibold text-text-primary text-sm">Day {day.day_number} — {day.label}</p>
-                    <span className="text-xs text-text-muted">{day.exercises?.length || 0} exercises</span>
-                  </div>
-                  {day.exercises?.length > 0 && (
-                    <p className="text-xs text-text-muted truncate">
-                      {day.exercises.slice(0, 3).map(e => e.exercise?.name).filter(Boolean).join(', ')}
-                      {day.exercises.length > 3 ? ` +${day.exercises.length - 3} more` : ''}
-                    </p>
-                  )}
-                </button>
-              ))}
-            <button
-              onClick={() => beginWorkout(null)}
-              className="w-full text-center py-3 text-sm text-text-muted hover:text-text-primary transition-colors border border-dashed border-border rounded-2xl"
-            >
-              Free workout (no split)
-            </button>
-          </div>
-        </Modal>
-      )}
-
       {/* Exercise picker modal */}
-      <Modal open={pickModal} onClose={() => setPickModal(false)} title="Add Exercise">
-        <Input
-          placeholder="Search exercises..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          leftIcon={<Search className="w-4 h-4" />}
-          className="mb-4"
-        />
-        <div className="space-y-4">
+      <Modal open={pickModal} onClose={() => setPickModal(false)} title="Add Exercise" size="lg">
+        <div className="space-y-3">
+          <Input
+            placeholder="Search exercises..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            leftIcon={<Search className="w-4 h-4" />}
+          />
+          {/* Muscle group filter */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+            {muscleGroups.map(mg => (
+              <button
+                key={mg}
+                onClick={() => setMuscleFilter(mg)}
+                className={`flex-shrink-0 px-3 py-1 rounded-lg text-xs font-medium transition-colors ${muscleFilter === mg ? 'bg-primary-700 text-white' : 'bg-bg-tertiary text-text-muted hover:bg-bg-hover'}`}
+              >
+                {mg}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-4 mt-4">
           {Object.entries(grouped).map(([group, exs]) => (
             <div key={group}>
               <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">{group}</h4>
