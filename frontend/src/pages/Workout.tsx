@@ -11,7 +11,8 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
-import type { Exercise, Workout, CardioSession, CardioType, Split } from '../types'
+import type { Exercise, Workout, CardioSession, CardioType, Split, ParsedSet } from '../types'
+import { VoiceLogger } from '../components/workout/VoiceLogger'
 
 interface LiveSet {
   id?: string
@@ -23,6 +24,8 @@ interface LiveSet {
   rpe?: number | null
   is_warmup: boolean
   saved: boolean
+  // FIX: BUG 3 — track in-flight API calls per set to prevent duplicate submissions
+  saving?: boolean
   set_type?: 'normal' | 'warmup' | 'dropset' | 'superset'
   superset_group?: number | null
   notes?: string
@@ -121,6 +124,10 @@ export function WorkoutPage() {
   const [timer, setTimer] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
   const [loading, setLoading] = useState(false)
+  // FIX: BUG 5 — guard against double workout creation
+  const creatingWorkoutRef = useRef(false)
+  // FIX: BUG 5 — guard against double "Complete Workout" tap
+  const finishingRef = useRef(false)
   const [activeSplit, setActiveSplit] = useState<Split | null>(null)
   const [recentWorkouts, setRecentWorkouts] = useState<Workout[]>([])
   // Rest timer
@@ -248,6 +255,9 @@ export function WorkoutPage() {
   }
 
   const beginWorkout = async (splitDayIdx: number | null) => {
+    // FIX: BUG 5 — idempotency guard: prevent double workout creation from rapid taps
+    if (creatingWorkoutRef.current) return
+    creatingWorkoutRef.current = true
     setLoading(true)
     try {
       const sortedDays = activeSplit ? [...activeSplit.days].sort((a, b) => a.day_number - b.day_number) : []
@@ -301,6 +311,8 @@ export function WorkoutPage() {
       toast.error('Failed to start workout')
     } finally {
       setLoading(false)
+      // FIX: BUG 5 — reset guard after attempt (success or failure)
+      creatingWorkoutRef.current = false
     }
   }
 
@@ -363,19 +375,47 @@ export function WorkoutPage() {
     if (!workout) return
     const s = blocks[blockIdx].sets[setIdx]
     const block = blocks[blockIdx]
+    // FIX: BUG 3 — prevent duplicate submissions: bail if this set is already being saved
+    if (s.saving) return
+
+    // FIX: BUG 3 — mark set as saving immediately to disable button
+    setBlocks(b => {
+      const next = [...b]
+      next[blockIdx] = { ...next[blockIdx], sets: [...next[blockIdx].sets] }
+      next[blockIdx].sets[setIdx] = { ...next[blockIdx].sets[setIdx], saving: true }
+      return next
+    })
+
     try {
-      const saved = await workoutsApi.addSet(workout.id, {
-        exercise_id: s.exercise_id,
-        set_number: s.set_number,
-        reps: s.reps,
-        weight_kg: s.weight_kg,
-        rpe: s.rpe ?? undefined,
-        is_warmup: s.is_warmup,
-        notes: s.notes,
-      })
+      let savedId: string
+
+      // FIX: BUG 2 — if the set already has a server id, call PUT (update) not POST (add)
+      if (s.id) {
+        await workoutsApi.updateSet(workout.id, s.id, {
+          reps: s.reps,
+          weight_kg: s.weight_kg,
+          rpe: s.rpe ?? undefined,
+          is_warmup: s.is_warmup,
+          notes: s.notes,
+        } as any)
+        savedId = s.id
+      } else {
+        const saved = await workoutsApi.addSet(workout.id, {
+          exercise_id: s.exercise_id,
+          set_number: s.set_number,
+          reps: s.reps,
+          weight_kg: s.weight_kg,
+          rpe: s.rpe ?? undefined,
+          is_warmup: s.is_warmup,
+          notes: s.notes,
+        })
+        savedId = saved.id
+      }
+
       setBlocks(b => {
         const next = [...b]
-        next[blockIdx].sets[setIdx] = { ...s, id: saved.id, saved: true }
+        next[blockIdx] = { ...next[blockIdx], sets: [...next[blockIdx].sets] }
+        next[blockIdx].sets[setIdx] = { ...next[blockIdx].sets[setIdx], id: savedId, saved: true, saving: false }
         return next
       })
       // Start rest timer after saving a working set
@@ -391,21 +431,77 @@ export function WorkoutPage() {
         } catch { /* PR check is non-critical */ }
       }
     } catch {
+      // FIX: BUG 2/3 — on failure, revert saving flag and show error
+      setBlocks(b => {
+        const next = [...b]
+        next[blockIdx] = { ...next[blockIdx], sets: [...next[blockIdx].sets] }
+        next[blockIdx].sets[setIdx] = { ...next[blockIdx].sets[setIdx], saving: false }
+        return next
+      })
       toast.error('Failed to save set')
     }
   }
 
   const finishWorkout = async () => {
     if (!workout) return
+    // FIX: BUG 5 — disable "Complete" button after first tap to prevent double finish
+    if (finishingRef.current) return
+    finishingRef.current = true
     stopRest()
     setTimerRunning(false)
-    await workoutsApi.update(workout.id, { duration_min: Math.floor(timer / 60), notes: sessionNotes || undefined })
-    toast.success(`Workout done! ${formatTime(timer)} ⚡`)
+    try {
+      await workoutsApi.update(workout.id, { duration_min: Math.floor(timer / 60), notes: sessionNotes || undefined })
+      toast.success(`Workout done! ${formatTime(timer)} ⚡`)
+    } catch {
+      toast.error('Failed to save workout — data may be incomplete')
+    } finally {
+      finishingRef.current = false
+    }
     setWorkout(null)
     setBlocks([])
     setTimer(0)
     setSessionNotes('')
   }
+
+  // Handle voice-parsed set: pre-fill the matching exercise block's last set
+  const handleVoiceParsed = (parsed: ParsedSet) => {
+    if (!workout) return
+    setBlocks(prev => {
+      const next = [...prev]
+      // Find matching block by exercise name if provided
+      let targetIdx = next.length - 1 // default: last block
+      if (parsed.exercise_name) {
+        const nameMatch = parsed.exercise_name.toLowerCase()
+        const found = next.findIndex(bl => bl.exercise.name.toLowerCase().includes(nameMatch))
+        if (found !== -1) targetIdx = found
+      }
+      if (targetIdx < 0 || !next[targetIdx]) return prev
+      const block = { ...next[targetIdx] }
+      const sets = [...block.sets]
+      // Find first unsaved set to pre-fill, or the last set
+      const setIdx = sets.findIndex(s => !s.saved)
+      const idx = setIdx !== -1 ? setIdx : sets.length - 1
+      if (idx < 0) return prev
+      sets[idx] = {
+        ...sets[idx],
+        ...(parsed.weight_kg !== undefined ? { weight_kg: parsed.weight_kg } : {}),
+        ...(parsed.reps !== undefined ? { reps: parsed.reps } : {}),
+        ...(parsed.rpe !== undefined ? { rpe: parsed.rpe } : {}),
+        saved: false,
+      }
+      block.sets = sets
+      block.expanded = true
+      next[targetIdx] = block
+      return next
+    })
+  }
+
+  // Derive context values for VoiceLogger
+  const currentBlock = blocks.length > 0 ? blocks[blocks.findIndex(b => b.sets.some(s => !s.saved)) ?? blocks.length - 1] : null
+  const currentExercise = currentBlock?.exercise ?? null
+  const currentUnsavedSet = currentBlock?.sets.find(s => !s.saved) ?? null
+  const lastWeight = currentUnsavedSet?.weight_kg ?? currentBlock?.prevBest?.weight_kg ?? 0
+  const lastReps = currentUnsavedSet?.reps ?? currentBlock?.prevBest?.reps ?? 0
 
   // Group exercises for picker
   const muscleGroups = ['All', ...Array.from(new Set(exercises.map(e => e.muscle_group))).sort()]
@@ -661,9 +757,11 @@ export function WorkoutPage() {
                                     </button>
                                   </div>
 
+                                  {/* FIX: BUG 3 — button disabled while API call is in flight */}
                                   <button
                                     onClick={() => saveSet(blockIdx, setIdx)}
-                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${set.saved ? 'bg-accent-green/20 text-accent-green' : 'bg-bg-hover text-text-muted hover:text-text-primary'}`}
+                                    disabled={!!set.saving}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${set.saving ? 'bg-bg-tertiary text-text-disabled cursor-not-allowed' : set.saved ? 'bg-accent-green/20 text-accent-green' : 'bg-bg-hover text-text-muted hover:text-text-primary'}`}
                                   >
                                     <Check className="w-4 h-4" />
                                   </button>
@@ -858,6 +956,18 @@ export function WorkoutPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Voice logger — floating button, only shown during an active lift workout */}
+      {workout && tab === 'lift' && (
+        <VoiceLogger
+          onSetParsed={handleVoiceParsed}
+          context={{
+            exercise_name: currentExercise?.name,
+            last_weight: lastWeight,
+            last_reps: lastReps,
+          }}
+        />
+      )}
 
       {/* Exercise picker modal */}
       <Modal open={pickModal} onClose={() => setPickModal(false)} title="Add Exercise" size="lg">

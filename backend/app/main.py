@@ -16,6 +16,7 @@ from app.routers import (
 from app.routers import records, schedule, tools, export
 from app.routers import program
 from app.routers import gamification
+from app.routers import buddy, voice
 from app.database import init_db, migrate_db, IS_SQLITE
 from app.seed import seed_exercises
 
@@ -78,6 +79,8 @@ app.include_router(tools.router,        prefix="/api/v1/tools",        tags=["to
 app.include_router(export.router,       prefix="/api/v1/export",       tags=["export"])
 app.include_router(program.router,      prefix="/api/v1/program",      tags=["program"])
 app.include_router(gamification.router, prefix="/api/v1/gamification", tags=["gamification"])
+app.include_router(buddy.router,        prefix="/api/v1/buddy",        tags=["buddy"])
+app.include_router(voice.router,        prefix="/api/v1/voice",        tags=["voice"])
 
 
 @app.get("/health", tags=["health"])

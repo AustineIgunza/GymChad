@@ -87,6 +87,9 @@ export const useAuthStore = create<AuthState>()(
       logout: async () => {
         await supabase.auth.signOut()
         set({ user: null })
+        // FIX: Proactive — clear persisted workout state on logout so the next user
+        // doesn't see a previous session's active workout
+        localStorage.removeItem('gymchad-active-workout')
       },
     }),
     {

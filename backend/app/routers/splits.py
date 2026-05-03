@@ -189,3 +189,163 @@ async def delete_split(
         raise HTTPException(status_code=404, detail="Split not found")
     await db.delete(split)
     await db.commit()
+
+
+# FIX: Proactive — duplicate and share endpoints were referenced by the frontend but missing from backend
+@router.post("/{split_id}/duplicate", response_model=SplitResponse, status_code=status.HTTP_201_CREATED)
+async def duplicate_split(
+    split_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Duplicate a split — creates a copy owned by the requesting user."""
+    result = await db.execute(
+        select(Split)
+        .where(and_(Split.id == split_id, Split.user_id == current_user.id))
+        .options(
+            selectinload(Split.days)
+            .selectinload(SplitDay.exercises)
+        )
+    )
+    original = result.scalar_one_or_none()
+    if not original:
+        raise HTTPException(status_code=404, detail="Split not found")
+
+    new_split = Split(
+        name=f"{original.name} (copy)",
+        description=original.description,
+        user_id=current_user.id,
+        is_active=False,
+    )
+    db.add(new_split)
+    await db.flush()
+
+    for day in original.days:
+        new_day = SplitDay(split_id=new_split.id, day_number=day.day_number, label=day.label)
+        db.add(new_day)
+        await db.flush()
+        for sde in day.exercises:
+            new_sde = SplitDayExercise(
+                split_day_id=new_day.id,
+                exercise_id=sde.exercise_id,
+                order=sde.order,
+                target_sets=sde.target_sets,
+                target_reps_min=sde.target_reps_min,
+                target_reps_max=sde.target_reps_max,
+            )
+            db.add(new_sde)
+
+    await db.commit()
+
+    result2 = await db.execute(
+        select(Split)
+        .where(Split.id == new_split.id)
+        .options(
+            selectinload(Split.days)
+            .selectinload(SplitDay.exercises)
+            .selectinload(SplitDayExercise.exercise)
+        )
+    )
+    return _split_to_dict(result2.scalar_one())
+
+
+@router.post("/{split_id}/share")
+async def share_split(
+    split_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate a shareable token for a split."""
+    import uuid
+    result = await db.execute(
+        select(Split).where(and_(Split.id == split_id, Split.user_id == current_user.id))
+    )
+    split = result.scalar_one_or_none()
+    if not split:
+        raise HTTPException(status_code=404, detail="Split not found")
+
+    if not getattr(split, "shared_token", None):
+        split.shared_token = str(uuid.uuid4())
+        await db.commit()
+        await db.refresh(split)
+
+    return {"shared_token": split.shared_token}
+
+
+# FIX: Proactive — public shared split lookup endpoint (no auth required)
+@router.get("/shared/{token}", response_model=SplitResponse)
+async def get_shared_split(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public endpoint — look up a split by its shared token."""
+    result = await db.execute(
+        select(Split)
+        .where(Split.shared_token == token)
+        .options(
+            selectinload(Split.days)
+            .selectinload(SplitDay.exercises)
+            .selectinload(SplitDayExercise.exercise)
+        )
+    )
+    split = result.scalar_one_or_none()
+    if not split:
+        raise HTTPException(status_code=404, detail="Shared split not found")
+    return _split_to_dict(split)
+
+
+@router.post("/shared/{token}/import", response_model=SplitResponse, status_code=status.HTTP_201_CREATED)
+async def import_shared_split(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Import (copy) a shared split into the requesting user's account."""
+    result = await db.execute(
+        select(Split)
+        .where(Split.shared_token == token)
+        .options(
+            selectinload(Split.days)
+            .selectinload(SplitDay.exercises)
+        )
+    )
+    original = result.scalar_one_or_none()
+    if not original:
+        raise HTTPException(status_code=404, detail="Shared split not found")
+
+    new_split = Split(
+        name=original.name,
+        description=original.description,
+        user_id=current_user.id,
+        is_active=False,
+    )
+    db.add(new_split)
+    await db.flush()
+
+    for day in original.days:
+        new_day = SplitDay(split_id=new_split.id, day_number=day.day_number, label=day.label)
+        db.add(new_day)
+        await db.flush()
+        for sde in day.exercises:
+            new_sde = SplitDayExercise(
+                split_day_id=new_day.id,
+                exercise_id=sde.exercise_id,
+                order=sde.order,
+                target_sets=sde.target_sets,
+                target_reps_min=sde.target_reps_min,
+                target_reps_max=sde.target_reps_max,
+            )
+            db.add(new_sde)
+
+    await db.commit()
+
+    result2 = await db.execute(
+        select(Split)
+        .where(Split.id == new_split.id)
+        .options(
+            selectinload(Split.days)
+            .selectinload(SplitDay.exercises)
+            .selectinload(SplitDayExercise.exercise)
+        )
+    )
+    return _split_to_dict(result2.scalar_one())

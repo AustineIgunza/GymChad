@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAuthStore } from './stores/authStore'
@@ -7,20 +7,26 @@ import { SideNav } from './components/ui/SideNav'
 import { ToastContainer } from './components/ui/Toast'
 import { AnimatedBackground } from './components/ui/AnimatedBackground'
 
-// Pages
+// Auth pages are small and needed immediately — keep them eager
 import { Login } from './pages/auth/Login'
 import { Register } from './pages/auth/Register'
 import { Onboarding } from './pages/auth/Onboarding'
-import { Dashboard } from './pages/Dashboard'
-import { WorkoutPage } from './pages/Workout'
-import { NutritionPage } from './pages/Nutrition'
-import { AnalyticsPage } from './pages/Analytics'
-import { SettingsPage } from './pages/Settings'
-import { SplitsPage } from './pages/Splits'
-import { HistoryPage } from './pages/History'
-import { SchedulePage } from './pages/Schedule'
-import { ToolsPage } from './pages/Tools'
 import { SharedSplitPage } from './pages/SharedSplit'
+
+// FIX: BUG 4 — Lazy-load all heavy pages so tab switching doesn't block the main thread.
+// Previously all pages were eagerly imported, causing large initial bundle and navigation hangs.
+const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })))
+const WorkoutPage = lazy(() => import('./pages/Workout').then(m => ({ default: m.WorkoutPage })))
+const NutritionPage = lazy(() => import('./pages/Nutrition').then(m => ({ default: m.NutritionPage })))
+const AnalyticsPage = lazy(() => import('./pages/Analytics').then(m => ({ default: m.AnalyticsPage })))
+const SettingsPage = lazy(() => import('./pages/Settings').then(m => ({ default: m.SettingsPage })))
+const SplitsPage = lazy(() => import('./pages/Splits').then(m => ({ default: m.SplitsPage })))
+const HistoryPage = lazy(() => import('./pages/History').then(m => ({ default: m.HistoryPage })))
+const SchedulePage = lazy(() => import('./pages/Schedule').then(m => ({ default: m.SchedulePage })))
+const ToolsPage = lazy(() => import('./pages/Tools').then(m => ({ default: m.ToolsPage })))
+const ProgramPage = lazy(() => import('./pages/Program'))
+const BuddyWorkoutPage = lazy(() => import('./pages/BuddyWorkout'))
+const ChallengesPage = lazy(() => import('./pages/Challenges'))
 
 const pageVariants = {
   initial: { opacity: 0, y: 10 },
@@ -84,6 +90,19 @@ function AppShell({ children }: { children: React.ReactNode }) {
   )
 }
 
+// FIX: BUG 4 — Suspense fallback for lazy-loaded pages prevents blank screens during code-split chunk loading
+function PageSuspense({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="w-8 h-8 rounded-xl bg-primary-700/30 animate-pulse" />
+      </div>
+    }>
+      {children}
+    </Suspense>
+  )
+}
+
 function AppRoutes() {
   const location = useLocation()
 
@@ -95,50 +114,66 @@ function AppRoutes() {
         <Route path="/register"   element={<Register />} />
         <Route path="/onboarding" element={<Onboarding />} />
 
-        {/* Protected routes */}
+        {/* Protected routes — each wrapped in PageSuspense for lazy chunk loading */}
         <Route path="/" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><Dashboard /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><Dashboard /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/workout" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><WorkoutPage /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><WorkoutPage /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/nutrition" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><NutritionPage /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><NutritionPage /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/analytics" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><AnalyticsPage /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><AnalyticsPage /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/splits" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><SplitsPage /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><SplitsPage /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/history" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><HistoryPage /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><HistoryPage /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/settings" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><SettingsPage /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><SettingsPage /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/schedule" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><SchedulePage /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><SchedulePage /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
         <Route path="/tools" element={
           <ProtectedRoute>
-            <AppShell><PageTransition><ToolsPage /></PageTransition></AppShell>
+            <AppShell><PageSuspense><PageTransition><ToolsPage /></PageTransition></PageSuspense></AppShell>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/program" element={
+          <ProtectedRoute>
+            <AppShell><PageSuspense><PageTransition><ProgramPage /></PageTransition></PageSuspense></AppShell>
+          </ProtectedRoute>
+        } />
+        <Route path="/buddy" element={
+          <ProtectedRoute>
+            <AppShell><PageSuspense><PageTransition><BuddyWorkoutPage /></PageTransition></PageSuspense></AppShell>
+          </ProtectedRoute>
+        } />
+        <Route path="/challenges" element={
+          <ProtectedRoute>
+            <AppShell><PageSuspense><PageTransition><ChallengesPage /></PageTransition></PageSuspense></AppShell>
           </ProtectedRoute>
         } />
 

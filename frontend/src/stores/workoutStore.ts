@@ -2,6 +2,9 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Workout } from '../types'
 
+// FIX: BUG 5 / Proactive — max age for a persisted active workout session (24 hours in ms)
+const MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000
+
 interface ActiveSet {
   exercise_id: string
   exercise_name: string
@@ -53,6 +56,15 @@ export const useWorkoutStore = create<WorkoutState>()(
     }),
     {
       name: 'gymchad-active-workout',
+      // FIX: BUG 5 / Proactive — on rehydration, discard stale sessions older than 24 hours
+      // to prevent a previous day's incomplete workout from being resurrected
+      onRehydrateStorage: () => (state) => {
+        if (state && state.startTime && Date.now() - state.startTime > MAX_SESSION_AGE_MS) {
+          state.activeWorkout = null
+          state.activeSets = []
+          state.startTime = null
+        }
+      },
     }
   )
 )

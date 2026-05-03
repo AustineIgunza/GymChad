@@ -10,6 +10,7 @@ import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { MacroRing } from '../components/ui/MacroRing'
 import { PageHeader } from '../components/ui/PageHeader'
+import { NutritionIntelligence } from '../components/nutrition/NutritionIntelligence'
 import type { DailySummary, NutritionLog, FoodSearchResult, MealType } from '../types'
 
 const MEAL_LABELS: Record<MealType, string> = {
@@ -312,8 +313,8 @@ export function NutritionPage() {
     }
   }
 
-  // Silent background refresh — no loading spinner, used after logging food
-  const refreshNutrition = async (d: string) => {
+  // FIX: BUG 1 — silent background refresh returns a promise so callers can await it
+  const refreshNutrition = async (d: string): Promise<void> => {
     try {
       const data = await nutritionApi.getDay(d)
       setSummary(data)
@@ -394,15 +395,36 @@ export function NutritionPage() {
   const logAll = async () => {
     if (!pendingItems.length) return
     setSaving(true)
+
+    // FIX: BUG 1 — optimistically update daily totals immediately (<300ms) so UI reflects new food
+    // before the server response arrives
+    const addedCalories = pendingItems.reduce((s, i) => s + i.calories, 0)
+    const addedProtein = pendingItems.reduce((s, i) => s + i.protein_g, 0)
+    const addedCarbs = pendingItems.reduce((s, i) => s + i.carbs_g, 0)
+    const addedFat = pendingItems.reduce((s, i) => s + i.fat_g, 0)
+    setSummary(prev => {
+      const base = prev ?? { date, total_calories: 0, total_protein_g: 0, total_carbs_g: 0, total_fat_g: 0, logs: [] }
+      return {
+        ...base,
+        total_calories: Math.round((base.total_calories + addedCalories) * 10) / 10,
+        total_protein_g: Math.round((base.total_protein_g + addedProtein) * 10) / 10,
+        total_carbs_g: Math.round((base.total_carbs_g + addedCarbs) * 10) / 10,
+        total_fat_g: Math.round((base.total_fat_g + addedFat) * 10) / 10,
+      }
+    })
+
     try {
       await Promise.all(
         pendingItems.map(item => nutritionApi.create({ date, meal_type: mealType, ...item }))
       )
       closeModal()
       toast.success(`${pendingItems.length} food${pendingItems.length > 1 ? 's' : ''} logged!`)
-      refreshNutrition(date)
+      // FIX: BUG 1 — await the server refresh so UI shows accurate server data (including log IDs)
+      await refreshNutrition(date)
     } catch {
       toast.error('Failed to save — please try again')
+      // Revert optimistic update on failure
+      await refreshNutrition(date)
     } finally {
       setSaving(false)
     }
@@ -482,6 +504,8 @@ export function NutritionPage() {
           </Button>
         }
       />
+
+      <NutritionIntelligence context="daily" />
 
       {/* Date picker */}
       <div className="flex items-center justify-between bg-bg-card border border-border rounded-2xl px-4 py-3 mb-4">
