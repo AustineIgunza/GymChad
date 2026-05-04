@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAuthStore } from './stores/authStore'
@@ -6,6 +6,7 @@ import { BottomNav } from './components/ui/BottomNav'
 import { SideNav } from './components/ui/SideNav'
 import { ToastContainer } from './components/ui/Toast'
 import { AnimatedBackground } from './components/ui/AnimatedBackground'
+import { useSwipeBack } from './hooks/useSwipeBack'
 
 // Auth pages are small and needed immediately — keep them eager
 import { Login } from './pages/auth/Login'
@@ -27,6 +28,40 @@ const ToolsPage = lazy(() => import('./pages/Tools').then(m => ({ default: m.Too
 const ProgramPage = lazy(() => import('./pages/Program'))
 const BuddyWorkoutPage = lazy(() => import('./pages/BuddyWorkout'))
 const ChallengesPage = lazy(() => import('./pages/Challenges'))
+
+class RouteErrorBoundary extends React.Component<
+  { children: React.ReactNode; routeName: string },
+  { hasError: boolean; error: Error | null }
+> {
+  state = { hasError: false, error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(`[GymChad] Route error in ${this.props.routeName}:`, error)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[50vh] px-6 text-center">
+          <div className="text-3xl mb-3">⚠️</div>
+          <p className="text-text-primary font-semibold mb-1">Something went wrong</p>
+          <p className="text-text-muted text-sm mb-4">{this.state.error?.message}</p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-4 py-2 bg-primary-700 text-white rounded-xl text-sm font-medium"
+          >
+            Try again
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 const pageVariants = {
   initial: { opacity: 0, y: 10 },
@@ -105,6 +140,7 @@ function PageSuspense({ children }: { children: React.ReactNode }) {
 
 function AppRoutes() {
   const location = useLocation()
+  useSwipeBack()
 
   return (
     <AnimatePresence mode="wait" initial={false}>
@@ -117,63 +153,111 @@ function AppRoutes() {
         {/* Protected routes — each wrapped in PageSuspense for lazy chunk loading */}
         <Route path="/" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><Dashboard /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Dashboard">
+                <PageSuspense><PageTransition><Dashboard /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/workout" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><WorkoutPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Workout">
+                <PageSuspense><PageTransition><WorkoutPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/nutrition" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><NutritionPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Nutrition">
+                <PageSuspense><PageTransition><NutritionPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/analytics" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><AnalyticsPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Analytics">
+                <PageSuspense><PageTransition><AnalyticsPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/splits" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><SplitsPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Splits">
+                <PageSuspense><PageTransition><SplitsPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/history" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><HistoryPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="History">
+                <PageSuspense><PageTransition><HistoryPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/settings" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><SettingsPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Settings">
+                <PageSuspense><PageTransition><SettingsPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/schedule" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><SchedulePage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Schedule">
+                <PageSuspense><PageTransition><SchedulePage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/tools" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><ToolsPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Tools">
+                <PageSuspense><PageTransition><ToolsPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
 
         <Route path="/program" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><ProgramPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Program">
+                <PageSuspense><PageTransition><ProgramPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/buddy" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><BuddyWorkoutPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="BuddyWorkout">
+                <PageSuspense><PageTransition><BuddyWorkoutPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
         <Route path="/challenges" element={
           <ProtectedRoute>
-            <AppShell><PageSuspense><PageTransition><ChallengesPage /></PageTransition></PageSuspense></AppShell>
+            <AppShell>
+              <RouteErrorBoundary routeName="Challenges">
+                <PageSuspense><PageTransition><ChallengesPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
           </ProtectedRoute>
         } />
 

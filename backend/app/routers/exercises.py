@@ -1,18 +1,23 @@
 """routers/exercises.py — Exercise library CRUD"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from app.dependencies import get_db, get_current_user
 from app.models.exercise import Exercise, MuscleGroup
 from app.models.user import User
 from app.schemas.exercise import ExerciseCreate, ExerciseResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 
 @router.get("", response_model=list[ExerciseResponse])
+@limiter.limit("200/minute")
 async def get_exercises(
+    request: Request,
     muscle_group: MuscleGroup | None = Query(None),
     search: str | None = Query(None),
     db: AsyncSession = Depends(get_db),

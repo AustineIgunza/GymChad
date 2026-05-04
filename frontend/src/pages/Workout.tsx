@@ -4,7 +4,9 @@ import { Plus, Minus, X, Check, ChevronDown, ChevronUp, Search, Timer, Dumbbell,
 import { workoutsApi } from '../services/workouts'
 import { exercisesApi } from '../services/exercises'
 import { splitsApi } from '../services/splits'
-import { useToast, useUIStore } from '../stores/uiStore'
+import toast from 'react-hot-toast'
+import { useUIStore } from '../stores/uiStore'
+import { useWorkoutStore } from '../stores/workoutStore'
 import api from '../services/api'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -12,6 +14,7 @@ import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
 import type { Exercise, Workout, CardioSession, CardioType, Split, ParsedSet } from '../types'
+import { formatWeight, weightStep } from '../utils/units'
 import { VoiceLogger } from '../components/workout/VoiceLogger'
 
 interface LiveSet {
@@ -37,6 +40,7 @@ interface ExerciseBlock {
   sets: LiveSet[]
   expanded: boolean
   prevBest?: { weight_kg: number; reps: number } | null
+  recentHistory?: { date: string; sets: { weight_kg: number; reps: number; is_warmup: boolean }[] }[]
 }
 
 const CARDIO_TYPES: { value: CardioType; label: string; icon: string }[] = [
@@ -138,8 +142,8 @@ export function WorkoutPage() {
   const [prCelebration, setPrCelebration] = useState<{ show: boolean; weight: number; reps: number; exerciseName: string }>({ show: false, weight: 0, reps: 0, exerciseName: '' })
   // Session notes
   const [sessionNotes, setSessionNotes] = useState('')
-  const { showRpe } = useUIStore()
-  const toast = useToast()
+  const { showRpe, useKg } = useUIStore()
+  const { activeWorkout: storedWorkout, setActiveWorkout: storeSetWorkout, clearActive } = useWorkoutStore()
 
   // Cardio
   const [cardioForm, setCardioForm] = useState<CardioForm>(defaultCardioForm)
@@ -160,18 +164,68 @@ export function WorkoutPage() {
 
   // Request notification permission & fetch data on mount
   useEffect(() => {
+    const controller = new AbortController()
+    const { signal } = controller
+
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
-    exercisesApi.list().then(setExercises).catch(() => {})
-    splitsApi.list().then(splits => {
-      const active = splits.find(s => s.is_active) || null
-      setActiveSplit(active)
-    }).catch(() => {})
-    // Fetch recent workouts to detect which split day is next
-    api.get('/workouts', { params: { days: 14 } })
-      .then(r => setRecentWorkouts(Array.isArray(r.data) ? r.data : r.data?.workouts || []))
-      .catch(() => {})
+
+    const load = async () => {
+      const exs = await exercisesApi.list(signal).catch(() => [])
+      if (signal.aborted) return
+      setExercises(exs)
+      // FIX: BUG 5 — restore active workout from Zustand store if user navigated away mid-workout
+      // storedWorkout is read inside the callback so exercises are already in state
+      if (storedWorkout && !workout) {
+        setWorkout(storedWorkout)
+        setTimerRunning(true)
+        // Refetch workout's sets from backend to rebuild blocks
+        workoutsApi.get(storedWorkout.id).then(w => {
+          if (signal.aborted || !w.sets?.length) return
+          const byExercise: Record<string, LiveSet[]> = {}
+          for (const s of w.sets) {
+            if (!s.exercise_id) continue
+            if (!byExercise[s.exercise_id]) byExercise[s.exercise_id] = []
+            byExercise[s.exercise_id].push({
+              id: String(s.id),
+              exercise_id: s.exercise_id,
+              exercise_name: s.exercise?.name || '',
+              set_number: s.set_number,
+              reps: s.reps,
+              weight_kg: s.weight_kg,
+              rpe: s.rpe,
+              is_warmup: s.is_warmup,
+              saved: true,
+            })
+          }
+          const restored: ExerciseBlock[] = Object.entries(byExercise).map(([exId, sets]) => {
+            const ex = exs.find(e => e.id === exId) || { id: exId, name: sets[0]?.exercise_name, muscle_group: 'OTHER' } as any
+            return { exercise: ex, sets, expanded: true, prevBest: null }
+          })
+          setBlocks(restored)
+        }).catch(() => {})
+      }
+
+      splitsApi.list().then(splits => {
+        if (signal.aborted) return
+        const active = splits.find(s => s.is_active) || null
+        setActiveSplit(active)
+      }).catch(() => {})
+
+      // Fetch recent workouts to detect which split day is next
+      api.get('/workouts', { params: { days: 14 }, signal })
+        .then(r => {
+          if (signal.aborted) return
+          setRecentWorkouts(Array.isArray(r.data) ? r.data : r.data?.workouts || [])
+        })
+        .catch(() => {})
+    }
+
+    load()
+
+    return () => controller.abort()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Rest timer countdown
@@ -266,6 +320,8 @@ export function WorkoutPage() {
         : `Workout — ${new Date().toLocaleDateString()}`
       const w = await workoutsApi.create({ label: dayLabel })
       setWorkout(w)
+      // FIX: BUG 5 — persist workout to Zustand so navigation away doesn't lose active session
+      storeSetWorkout(w)
       setTimerRunning(true)
 
       // Auto-populate exercises from the chosen split day
@@ -323,11 +379,23 @@ export function WorkoutPage() {
       prevBest: null,
     }])
     setPickModal(false)
-    workoutsApi.exerciseHistory(ex.id, 1).then(hist => {
-      if (hist[0]?.sets?.length) {
-        const best = hist[0].sets.reduce((a: any, b: any) => b.weight_kg > a.weight_kg ? b : a, hist[0].sets[0])
-        setBlocks(bls => bls.map(bl => bl.exercise.id === ex.id ? { ...bl, prevBest: best } : bl))
-      }
+    workoutsApi.exerciseHistory(ex.id, 3).then(hist => {
+      if (!hist.length) return
+      const prevBest = hist[0]?.sets?.length
+        ? hist[0].sets.reduce((a: any, b: any) => b.weight_kg > a.weight_kg ? b : a, hist[0].sets[0])
+        : null
+      const recentHistory = hist.slice(0, 3).map((session: any) => ({
+        date: session.date,
+        sets: (session.sets || []).map((s: any) => ({
+          weight_kg: s.weight_kg,
+          reps: s.reps,
+          is_warmup: s.is_warmup,
+        })),
+      }))
+      setBlocks(bls => bls.map(bl => bl.exercise.id === ex.id
+        ? { ...bl, prevBest: prevBest ?? bl.prevBest, recentHistory }
+        : bl
+      ))
     }).catch(() => {})
   }
 
@@ -457,6 +525,8 @@ export function WorkoutPage() {
     } finally {
       finishingRef.current = false
     }
+    // FIX: BUG 5 — clear persisted workout from Zustand on finish
+    clearActive()
     setWorkout(null)
     setBlocks([])
     setTimer(0)
@@ -700,7 +770,7 @@ export function WorkoutPage() {
                               <div className="font-semibold text-text-primary">{block.exercise.name}</div>
                               {block.prevBest && (
                                 <div className="text-xs text-text-muted mt-0.5">
-                                  Prev best: {block.prevBest.weight_kg}kg × {block.prevBest.reps}
+                                  Prev best: {formatWeight(block.prevBest.weight_kg, useKg)} × {block.prevBest.reps}
                                 </div>
                               )}
                             </div>
@@ -728,16 +798,19 @@ export function WorkoutPage() {
                                   </button>
 
                                   <div className="flex items-center gap-1">
-                                    <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'weight_kg', Math.max(0, set.weight_kg - 2.5))}>
+                                    <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'weight_kg', Math.max(0, set.weight_kg - weightStep(useKg)))}>
                                       <Minus className="w-3 h-3" />
                                     </button>
                                     <input
                                       type="number"
+                                      inputMode="decimal"
+                                      min="0"
                                       value={set.weight_kg}
                                       onChange={e => updateSet(blockIdx, setIdx, 'weight_kg', parseFloat(e.target.value) || 0)}
+                                      onFocus={e => e.target.select()}
                                       className="w-14 bg-bg-secondary border border-border rounded-lg text-center text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-700/50 py-1"
                                     />
-                                    <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'weight_kg', set.weight_kg + 2.5)}>
+                                    <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'weight_kg', set.weight_kg + weightStep(useKg))}>
                                       <Plus className="w-3 h-3" />
                                     </button>
                                   </div>
@@ -748,8 +821,11 @@ export function WorkoutPage() {
                                     </button>
                                     <input
                                       type="number"
+                                      inputMode="numeric"
+                                      min="1"
                                       value={set.reps}
                                       onChange={e => updateSet(blockIdx, setIdx, 'reps', parseInt(e.target.value) || 1)}
+                                      onFocus={e => e.target.select()}
                                       className="w-12 bg-bg-secondary border border-border rounded-lg text-center text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-700/50 py-1"
                                     />
                                     <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'reps', set.reps + 1)}>
@@ -806,6 +882,24 @@ export function WorkoutPage() {
                                 )}
                                 </div>
                               ))}
+
+                              {block.recentHistory && block.recentHistory.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-border">
+                                  <p className="text-xs text-text-muted mb-1.5">Recent sessions</p>
+                                  <div className="space-y-1">
+                                    {block.recentHistory.slice(0, 3).map((session, i) => {
+                                      const workingSets = session.sets.filter(s => !s.is_warmup)
+                                      const best = workingSets.reduce((a, b) => b.weight_kg > a.weight_kg ? b : a, workingSets[0])
+                                      return (
+                                        <div key={i} className="flex items-center justify-between text-xs">
+                                          <span className="text-text-muted">{new Date(session.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                                          <span className="text-text-secondary">{workingSets.length} sets · Best: {formatWeight(best?.weight_kg ?? 0, useKg)} × {best?.reps}</span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              )}
 
                               <Button variant="ghost" size="sm" onClick={() => addSet(blockIdx)} className="w-full mt-1 border border-dashed border-border">
                                 <Plus className="w-3.5 h-3.5" /> Add Set

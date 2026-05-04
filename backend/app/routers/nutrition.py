@@ -41,6 +41,10 @@ async def get_nutrition(
         total_protein_g=round(total_protein, 1),
         total_carbs_g=round(total_carbs, 1),
         total_fat_g=round(total_fat, 1),
+        calorie_target=current_user.calorie_target,
+        protein_target=current_user.protein_target,
+        carbs_target=current_user.carbs_target,
+        fat_target=current_user.fat_target,
         logs=logs,
     )
 
@@ -108,6 +112,17 @@ async def update_log(
     await db.commit()
     await db.refresh(log)
     return log
+
+
+@router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_nutrition_logs(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete ALL nutrition logs for the current user."""
+    from sqlalchemy import delete as sql_delete
+    await db.execute(sql_delete(NutritionLog).where(NutritionLog.user_id == current_user.id))
+    await db.commit()
 
 
 @router.delete("/{log_id}", status_code=status.HTTP_204_NO_CONTENT)

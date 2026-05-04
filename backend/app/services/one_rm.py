@@ -41,21 +41,23 @@ def calculate_one_rm(weight: float, reps: int) -> dict:
         75: 8, 70: 10, 65: 12, 60: 15, 55: 18, 50: 20,
     }
 
-    percentage_table = []
+    # FIX: renamed percentage_table → percentage_chart and estimated_reps → reps
+    # to match the frontend interface expectation
+    percentage_chart = []
     for pct in range(100, 45, -5):
         w = round(avg * pct / 100, 1)
-        percentage_table.append({
+        percentage_chart.append({
             "pct": pct,
             "weight": w,
-            "estimated_reps": pct_reps.get(pct, max(1, round(30 * (1 - pct / 100)))),
+            "reps": pct_reps.get(pct, max(1, round(30 * (1 - pct / 100)))),
         })
 
     return {
-        "input_weight": weight,
-        "input_reps": reps,
+        "weight": weight,
+        "reps": reps,
         "epley": e,
         "brzycki": b,
         "lombardi": l,
         "average": avg,
-        "percentage_table": percentage_table,
+        "percentage_chart": percentage_chart,
     }

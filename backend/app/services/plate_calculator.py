@@ -39,13 +39,14 @@ def calculate_plates(
     per_side = (target_weight - bar) / 2
 
     if per_side < 0:
+        # FIX: return frontend-expected field names (weight_per_side, plates_per_side, achievable, actual_weight)
         return {
             "target_weight": target_weight,
             "bar_weight": bar,
-            "achievable_weight": bar,
-            "per_side": 0,
-            "plates": [],
-            "remainder": 0,
+            "weight_per_side": 0.0,
+            "plates_per_side": [],
+            "achievable": False,
+            "actual_weight": bar,
             "unit": unit,
         }
 
@@ -62,14 +63,16 @@ def calculate_plates(
             remaining -= count * plate
             remaining = round(remaining, 4)
 
-    achievable = bar + sum(p.plate * p.count for p in result) * 2
+    actual = bar + sum(p.plate * p.count for p in result) * 2
+    is_achievable = round(remaining * 2, 4) < 0.01  # negligible remainder
 
+    # FIX: use frontend-expected field names throughout
     return {
         "target_weight": target_weight,
         "bar_weight": bar,
-        "achievable_weight": round(achievable, 2),
-        "per_side": per_side,
-        "plates": [{"plate": p.plate, "count": p.count, "color": p.color} for p in result],
-        "remainder": round(remaining * 2, 4),
+        "weight_per_side": round(per_side, 2),
+        "plates_per_side": [{"weight": p.plate, "count": p.count, "color": p.color} for p in result],
+        "achievable": is_achievable,
+        "actual_weight": round(actual, 2),
         "unit": unit,
     }

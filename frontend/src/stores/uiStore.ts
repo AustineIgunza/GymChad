@@ -14,6 +14,8 @@ interface UIState {
   showRpe: boolean
   toggleTheme: () => void
   toggleRpe: () => void
+  useKg: boolean
+  toggleUnit: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -46,6 +48,14 @@ export const useUIStore = create<UIState>((set) => ({
     const v = !s.showRpe
     localStorage.setItem('showRpe', String(v))
     return { showRpe: v }
+  }),
+
+  useKg: localStorage.getItem('useKg') !== 'false', // default true (kg)
+
+  toggleUnit: () => set(s => {
+    const v = !s.useKg
+    localStorage.setItem('useKg', String(v))
+    return { useKg: v }
   }),
 }))
 

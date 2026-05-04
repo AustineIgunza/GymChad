@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Dumbbell, Settings, ChevronRight, Zap, TrendingUp, ChevronDown, Footprints } from 'lucide-react'
+import { Play, Dumbbell, Settings, ChevronRight, Zap, TrendingUp, ChevronDown, Footprints, Flame, Trophy } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
-import { useToast } from '../stores/uiStore'
 import { workoutsApi } from '../services/workouts'
 import { nutritionApi } from '../services/nutrition'
+import { gamificationApi } from '../services/gamification'
 import api from '../services/api'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -31,15 +33,14 @@ interface TodayActivity {
   calorie_target: number | null
 }
 
+function SkeletonCard({ height = 'h-24' }: { height?: string }) {
+  return <div className={`animate-pulse bg-bg-tertiary rounded-2xl ${height}`} />
+}
+
 export function Dashboard() {
   const { user } = useAuthStore()
   const navigate = useNavigate()
-  const toast = useToast()
-  const [todayWorkouts, setTodayWorkouts] = useState<Workout[]>([])
-  const [nutrition, setNutrition] = useState<DailySummary | null>(null)
-  const [recommendations, setRecommendations] = useState<any[]>([])
-  const [activity, setActivity] = useState<TodayActivity | null>(null)
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
   const [recsExpanded, setRecsExpanded] = useState(false)
   const [stepsInput, setStepsInput] = useState('')
   const [savingSteps, setSavingSteps] = useState(false)
@@ -49,46 +50,56 @@ export function Dashboard() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  const fetchAll = async () => {
-    const [w, n, recs, act] = await Promise.all([
-      workoutsApi.today().catch(() => []),
-      nutritionApi.getDay(today).catch(() => null),
-      workoutsApi.recommendations().catch(() => []),
-      api.get('/cardio/activity/today').then(r => r.data).catch(() => null),
-    ])
-    setTodayWorkouts(w)
-    setNutrition(n)
-    setRecommendations(recs.filter((r: any) => r.suggested_weight_kg !== null))
-    setActivity(act)
-    setLoading(false)
-  }
+  const { data: todayWorkouts = [] } = useQuery({
+    queryKey: ['workouts-today'],
+    queryFn: () => workoutsApi.today(),
+  })
 
-  useEffect(() => { fetchAll() }, [today])
+  const { data: nutrition } = useQuery<DailySummary | null>({
+    queryKey: ['nutrition', today],
+    queryFn: () => nutritionApi.getDay(today),
+  })
+
+  const { data: rawRecommendations = [] } = useQuery({
+    queryKey: ['recommendations'],
+    queryFn: () => workoutsApi.recommendations(),
+  })
+  const recommendations = rawRecommendations.filter((r: any) => r.suggested_weight_kg !== null)
+
+  const { data: activity, refetch: refetchActivity } = useQuery<TodayActivity | null>({
+    queryKey: ['activity-today'],
+    queryFn: () => api.get('/cardio/activity/today').then(r => r.data).catch(() => null),
+  })
+
+  const { data: streak } = useQuery({
+    queryKey: ['streak'],
+    queryFn: () => gamificationApi.getStreak(),
+  })
+
+  const { data: recentPrs = [] } = useQuery({
+    queryKey: ['recent-prs'],
+    queryFn: () => api.get('/records').then(r => r.data.slice(0, 3)),
+  })
 
   const logSteps = async () => {
     const steps = parseInt(stepsInput)
     if (!steps || steps < 0) return
     setSavingSteps(true)
-    // Optimistic update — show immediately, no waiting
-    setActivity(prev => prev ? { ...prev, steps } : prev)
     setShowStepsInput(false)
     setStepsInput('')
     try {
       await api.post('/cardio/activity', { date: today, steps })
-      // Refresh with accurate server data in background
-      api.get('/cardio/activity/today').then(r => setActivity(r.data)).catch(() => {})
+      refetchActivity()
     } catch {
       toast.error('Failed to save steps')
-      fetchAll() // revert
     } finally {
       setSavingSteps(false)
     }
   }
 
-  const totalSets = todayWorkouts.reduce((acc, w) => acc + (w.sets || []).filter(s => !s.is_warmup).length, 0)
-  const musclesHit = [...new Set(todayWorkouts.flatMap(w => (w.sets || []).map(s => s.exercise?.muscle_group).filter(Boolean)))]
+  const totalSets = (todayWorkouts as Workout[]).reduce((acc, w) => acc + (w.sets || []).filter(s => !s.is_warmup).length, 0)
+  const musclesHit = [...new Set((todayWorkouts as Workout[]).flatMap(w => (w.sets || []).map(s => s.exercise?.muscle_group).filter(Boolean)))]
 
-  // Net = eaten - burned. Negative = deficit (burning more than eating).
   const caloriesEaten = nutrition?.total_calories || 0
   const caloriesBurned = activity?.total_burned || 0
   const netCalories = caloriesEaten - caloriesBurned
@@ -162,6 +173,33 @@ export function Dashboard() {
           </motion.div>
         </motion.div>
 
+        {/* Streak card */}
+        <motion.div variants={item}>
+          {streak === undefined ? (
+            <SkeletonCard height="h-20" />
+          ) : streak ? (
+            <Card padding="md">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${streak.is_at_risk ? 'bg-accent-orange/10' : 'bg-accent-green/10'}`}>
+                    <Flame className={`w-5 h-5 ${streak.is_at_risk ? 'text-accent-orange' : 'text-accent-green'}`} />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-text-primary text-sm">Workout Streak</p>
+                    <p className="text-xs text-text-muted">
+                      {streak.is_at_risk ? 'Log a workout today to keep your streak!' : `Longest: ${streak.longest_streak} days`}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-bold text-text-primary">{streak.current_streak}</p>
+                  <p className="text-xs text-text-muted">days</p>
+                </div>
+              </div>
+            </Card>
+          ) : null}
+        </motion.div>
+
         {/* TDEE / Daily Energy Balance */}
         <motion.div variants={item}>
           <Card padding="md">
@@ -202,9 +240,9 @@ export function Dashboard() {
               )}
             </AnimatePresence>
 
-            {loading ? (
+            {activity === undefined ? (
               <div className="space-y-2">
-                {[1,2,3].map(i => <div key={i} className="skeleton h-8 rounded-lg" />)}
+                {[1, 2, 3].map(i => <div key={i} className="skeleton h-8 rounded-lg" />)}
               </div>
             ) : activity ? (
               <>
@@ -265,9 +303,9 @@ export function Dashboard() {
                 Log food <ChevronRight className="w-3.5 h-3.5" />
               </Link>
             </div>
-            {loading ? (
+            {nutrition === undefined ? (
               <div className="h-40 flex items-center justify-center">
-                <div className="skeleton h-40 w-40 rounded-full" />
+                <div className="animate-pulse bg-bg-tertiary rounded-full w-40 h-40" />
               </div>
             ) : (
               <div className="flex justify-center">
@@ -282,6 +320,36 @@ export function Dashboard() {
               </div>
             )}
           </Card>
+        </motion.div>
+
+        {/* Recent PRs */}
+        <motion.div variants={item}>
+          {recentPrs === undefined ? (
+            <SkeletonCard height="h-24" />
+          ) : recentPrs.length > 0 ? (
+            <Card padding="md">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-accent-orange" />
+                  <h3 className="font-semibold text-text-primary">Recent PRs</h3>
+                </div>
+                <Link to="/analytics" className="text-primary-400 text-xs hover:text-primary-300 transition-colors">
+                  See all
+                </Link>
+              </div>
+              <div className="space-y-2">
+                {recentPrs.map((pr: any) => (
+                  <div key={pr.id} className="flex items-center justify-between p-2 bg-bg-tertiary rounded-xl">
+                    <div>
+                      <p className="text-xs font-semibold text-text-primary">{pr.exercise_name}</p>
+                      <p className="text-xs text-text-muted capitalize">{pr.pr_type} PR</p>
+                    </div>
+                    <p className="text-sm font-bold text-accent-orange">{pr.weight_kg}kg × {pr.reps}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ) : null}
         </motion.div>
 
         {/* Muscle groups hit today */}

@@ -14,7 +14,8 @@ Generated: 2026-05-03
 | `frontend/src/pages/Workout.tsx` | BUG 2, 3, 5 fixes — saveSet calls updateSet for existing sets, per-set saving flag, double-creation guard, double-finish guard |
 | `frontend/src/pages/Nutrition.tsx` | BUG 1 fix — optimistic calorie/macro update + awaited server refresh after food log |
 | `frontend/src/stores/workoutStore.ts` | BUG 5 / Proactive — stale session discard on rehydration (>24h old) |
-| `frontend/src/stores/authStore.ts` | Proactive — logout clears persisted workout localStorage key |
+| `frontend/src/stores/authStore.ts` | Proactive — logout clears both in-memory workout store state and localStorage key |
+| `frontend/src/pages/Workout.tsx` (session 2) | PROACTIVE-4 — connect to workoutStore: save on start, restore sets on mount, clear on finish |
 
 ### Backend
 
@@ -69,9 +70,14 @@ Generated: 2026-05-03
 - **File**: `backend/app/routers/splits.py`
 
 #### PROACTIVE-2 — AUTH: Logout doesn't clear persisted workout state
-- **Root cause**: `logout()` in `authStore.ts` called `supabase.auth.signOut()` and set `user: null`, but the Zustand `gymchad-active-workout` localStorage key was never cleared. If a second user logged into the same device, they would see the previous user's in-progress workout state.
-- **Fix**: `logout()` now calls `localStorage.removeItem('gymchad-active-workout')` after signing out.
+- **Root cause**: `logout()` in `authStore.ts` called `supabase.auth.signOut()` and set `user: null`, but the Zustand `gymchad-active-workout` localStorage key was never cleared. If a second user logged into the same device, they would see the previous user's in-progress workout state. Additionally, the in-memory Zustand state was not cleared, meaning the store's `activeWorkout` would survive within the same browser session.
+- **Fix**: `logout()` now calls both `useWorkoutStore.getState().clearActive()` (clears in-memory state) and `localStorage.removeItem('gymchad-active-workout')` (clears persisted state) after signing out.
 - **File**: `frontend/src/stores/authStore.ts`
+
+#### PROACTIVE-4 — BUG 5 EXTENSION: Active workout not restored after tab navigation
+- **Root cause**: `WorkoutPage` stored the active workout in local `useState`, not connected to the Zustand store. Navigating away from `/workout` to any other page unmounted the component, destroying all workout state. The store had `activeWorkout` but it was never written to or read from by the page.
+- **Fix**: On `beginWorkout()` success, calls `storeSetWorkout(w)` to persist the workout to Zustand. On `finishWorkout()`, calls `clearActive()` to remove it. On mount, if `storedWorkout` exists (user navigated away mid-workout), restores the `workout` state and calls `workoutsApi.get(id)` to refetch the saved sets from the backend, rebuilding the exercise blocks.
+- **Files**: `frontend/src/pages/Workout.tsx`, `frontend/src/stores/authStore.ts`
 
 #### PROACTIVE-3 — WORKOUT STORE: Stale session rehydration
 - **Root cause**: The Zustand persist middleware would restore `activeWorkout` and `activeSets` from localStorage regardless of age. A workout started 3 days ago and never finished would appear as active when the app reopened.

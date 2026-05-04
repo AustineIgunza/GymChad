@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { User, Target, LogOut, Scale, ChevronRight, Dumbbell, Download } from 'lucide-react'
+import { User, Target, LogOut, Scale, ChevronRight, Dumbbell, Download, Trash2, AlertTriangle } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
-import { useToast, useUIStore } from '../stores/uiStore'
+import { useUIStore } from '../stores/uiStore'
 import api from '../services/api'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -16,9 +17,10 @@ export function SettingsPage() {
   const { user, logout } = useAuthStore()
   const [profileModal, setProfileModal] = useState(false)
   const [nutritionModal, setNutritionModal] = useState(false)
+  const [deleteNutritionModal, setDeleteNutritionModal] = useState(false)
   const [saving, setSaving] = useState(false)
-  const toast = useToast()
-  const { theme, toggleTheme, showRpe, toggleRpe } = useUIStore()
+  const [deletingNutrition, setDeletingNutrition] = useState(false)
+  const { theme, toggleTheme, showRpe, toggleRpe, useKg, toggleUnit } = useUIStore()
 
   const [form, setForm] = useState({
     name: user?.name || '',
@@ -100,17 +102,32 @@ export function SettingsPage() {
     await logout()
   }
 
-  const handleExport = async (type: 'workouts' | 'measurements' | 'nutrition') => {
+  const downloadExport = async (type: 'workouts' | 'nutrition' | 'measurements') => {
     try {
       const res = await api.get(`/export/${type}`, { responseType: 'blob' })
       const url = URL.createObjectURL(res.data)
       const a = document.createElement('a')
       a.href = url
-      a.download = `gymchad_${type}_${new Date().toISOString().slice(0, 10)}.csv`
+      a.download = `gymchad-${type}-${new Date().toISOString().split('T')[0]}.csv`
       a.click()
       URL.revokeObjectURL(url)
       toast.success(`${type} exported!`)
-    } catch { toast.error('Export failed') }
+    } catch {
+      toast.error('Export failed')
+    }
+  }
+
+  const deleteAllNutrition = async () => {
+    setDeletingNutrition(true)
+    try {
+      await api.delete('/nutrition/all')
+      setDeleteNutritionModal(false)
+      toast.success('All nutrition logs deleted')
+    } catch {
+      toast.error('Failed to delete nutrition logs')
+    } finally {
+      setDeletingNutrition(false)
+    }
   }
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }))
@@ -163,6 +180,22 @@ export function SettingsPage() {
             >
               <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${showRpe ? 'translate-x-6' : ''}`} />
             </button>
+          </div>
+          <div className="flex items-center justify-between py-2 border-t border-border">
+            <div>
+              <p className="text-sm font-medium text-text-primary">Weight Units</p>
+              <p className="text-xs text-text-muted">Currently showing in {useKg ? 'kilograms (kg)' : 'pounds (lb)'}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-semibold transition-colors ${!useKg ? 'text-text-primary' : 'text-text-muted'}`}>lb</span>
+              <button
+                onClick={toggleUnit}
+                className={`relative w-12 h-6 rounded-full transition-colors ${useKg ? 'bg-primary-700' : 'bg-zinc-600'}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${useKg ? 'translate-x-6' : ''}`} />
+              </button>
+              <span className={`text-xs font-semibold transition-colors ${useKg ? 'text-text-primary' : 'text-text-muted'}`}>kg</span>
+            </div>
           </div>
         </div>
 
@@ -223,14 +256,32 @@ export function SettingsPage() {
         <div className="glass rounded-2xl p-4 mb-4">
           <h3 className="font-semibold text-text-primary mb-3">Export Data</h3>
           <div className="space-y-2">
-            {(['workouts', 'measurements', 'nutrition'] as const).map(type => (
-              <button key={type} onClick={() => handleExport(type)}
+            {(['workouts', 'nutrition', 'measurements'] as const).map(type => (
+              <button key={type} onClick={() => downloadExport(type)}
                 className="w-full flex items-center gap-3 py-2.5 px-3 bg-bg-tertiary rounded-xl hover:bg-bg-hover transition-colors text-left">
                 <Download className="w-4 h-4 text-text-muted" />
                 <span className="text-sm text-text-primary capitalize">Export {type}</span>
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Danger zone */}
+        <div className="glass rounded-2xl p-4 mb-4 border border-accent-red/20">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="w-4 h-4 text-accent-red" />
+            <h3 className="font-semibold text-accent-red">Danger Zone</h3>
+          </div>
+          <button
+            onClick={() => setDeleteNutritionModal(true)}
+            className="w-full flex items-center gap-3 py-2.5 px-3 bg-accent-red/10 rounded-xl hover:bg-accent-red/20 transition-colors text-left"
+          >
+            <Trash2 className="w-4 h-4 text-accent-red" />
+            <div>
+              <p className="text-sm font-medium text-accent-red">Delete all nutrition logs</p>
+              <p className="text-xs text-text-muted">This cannot be undone</p>
+            </div>
+          </button>
         </div>
 
         {/* Logout */}
@@ -283,7 +334,7 @@ export function SettingsPage() {
             ]}
           />
           <p className="text-xs text-text-muted">Saving will recalculate your TDEE and macro targets.</p>
-          <Button fullWidth loading={saving} onClick={saveProfile}>Save Changes</Button>
+          <Button fullWidth loading={saving} disabled={saving} onClick={saveProfile}>Save Changes</Button>
         </div>
       </Modal>
 
@@ -301,7 +352,35 @@ export function SettingsPage() {
             <Input label="Carbs (g)" type="number" value={nutrForm.carbs_target} onChange={e => setNutrForm(f => ({ ...f, carbs_target: e.target.value }))} />
             <Input label="Fat (g)" type="number" value={nutrForm.fat_target} onChange={e => setNutrForm(f => ({ ...f, fat_target: e.target.value }))} />
           </div>
-          <Button fullWidth loading={saving} onClick={saveNutrition}>Save Targets</Button>
+          <Button fullWidth loading={saving} disabled={saving} onClick={saveNutrition}>Save Targets</Button>
+        </div>
+      </Modal>
+
+      {/* Delete all nutrition confirmation modal */}
+      <Modal open={deleteNutritionModal} onClose={() => setDeleteNutritionModal(false)} title="Delete All Nutrition Logs">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-4 bg-accent-red/10 rounded-xl">
+            <AlertTriangle className="w-5 h-5 text-accent-red flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-text-primary mb-1">This action is irreversible</p>
+              <p className="text-xs text-text-muted">All your nutrition log entries will be permanently deleted. This cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" fullWidth onClick={() => setDeleteNutritionModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              fullWidth
+              loading={deletingNutrition}
+              disabled={deletingNutrition}
+              onClick={deleteAllNutrition}
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete All
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>

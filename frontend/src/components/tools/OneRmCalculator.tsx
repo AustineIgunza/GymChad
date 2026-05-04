@@ -18,10 +18,13 @@ export function OneRmCalculator({ onClose }: Props) {
   const [loading, setLoading] = useState(false)
 
   const calculate = async () => {
-    if (!weight || !reps) return
+    const w = parseFloat(weight)
+    const r = parseInt(reps)
+    // FIX: input validation before calling API
+    if (!w || w <= 0 || !r || r < 1 || r > 30) return
     setLoading(true)
     try {
-      const res = await api.post('/tools/1rm-calculator', { weight: parseFloat(weight), reps: parseInt(reps) })
+      const res = await api.post('/tools/1rm-calculator', { weight: w, reps: r })
       setResult(res.data)
     } catch {} finally { setLoading(false) }
   }
@@ -45,7 +48,8 @@ export function OneRmCalculator({ onClose }: Props) {
           placeholder="Reps"
           className="w-20 bg-bg-tertiary border border-border rounded-xl px-3 py-2 text-text-primary text-sm outline-none focus:border-primary-700" />
       </div>
-      <button onClick={calculate} disabled={loading || !weight || !reps}
+      <button onClick={calculate}
+        disabled={loading || !weight || !reps || parseFloat(weight) <= 0 || parseInt(reps) < 1 || parseInt(reps) > 30}
         className="w-full py-2.5 bg-primary-700 text-white rounded-xl font-semibold text-sm mb-4 disabled:opacity-50">
         {loading ? 'Calculating…' : 'Calculate'}
       </button>
@@ -79,7 +83,8 @@ export function OneRmCalculator({ onClose }: Props) {
               <tbody>
                 {result.percentage_chart.map(row => (
                   <tr key={row.pct} className="border-b border-border/40">
-                    <td className="py-1 text-text-muted">{Math.round(row.pct * 100)}%</td>
+                    {/* FIX: pct is already an integer percentage (e.g. 100, 95, 90) */}
+                    <td className="py-1 text-text-muted">{row.pct}%</td>
                     <td className="py-1 text-right font-medium text-text-primary">{row.weight.toFixed(1)}</td>
                     <td className="py-1 text-right text-text-secondary">{row.reps}</td>
                   </tr>

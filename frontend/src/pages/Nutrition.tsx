@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Search, ChevronLeft, ChevronRight, Trash2, X, PencilLine, Star, Pencil } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import { nutritionApi } from '../services/nutrition'
 import { useAuthStore } from '../stores/authStore'
-import { useToast } from '../stores/uiStore'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
@@ -11,6 +12,7 @@ import { Modal } from '../components/ui/Modal'
 import { MacroRing } from '../components/ui/MacroRing'
 import { PageHeader } from '../components/ui/PageHeader'
 import { NutritionIntelligence } from '../components/nutrition/NutritionIntelligence'
+import { detectFoodUnit } from '../utils/foodUnits'
 import type { DailySummary, NutritionLog, FoodSearchResult, MealType } from '../types'
 
 const MEAL_LABELS: Record<MealType, string> = {
@@ -174,15 +176,6 @@ const UNIT_TO_GRAMS: Partial<Record<ServingUnit, number>> = {
   g: 1, ml: 1, oz: 28.35, cup: 240, tbsp: 15, tsp: 5,
 }
 
-interface PendingItem {
-  food_name: string
-  quantity_g: number
-  calories: number
-  protein_g: number
-  carbs_g: number
-  fat_g: number
-}
-
 // Manual entry stores per-100g values + amount/unit
 interface ManualFood {
   name: string
@@ -275,11 +268,46 @@ function MacroPreview({ macros }: { macros: { calories: number; protein_g: numbe
   )
 }
 
+// Unit-based quantity input shown when a food unit is auto-detected
+interface UnitQuantityInputProps {
+  unitLabel: string       // e.g. "egg", "banana"
+  plural: string          // e.g. "eggs", "bananas"
+  gramsPerUnit: number    // e.g. 60
+  count: string
+  setCount: (v: string) => void
+}
+
+function UnitQuantityInput({ unitLabel, plural, gramsPerUnit, count, setCount }: UnitQuantityInputProps) {
+  const n = parseFloat(count) || 0
+  const totalGrams = Math.round(n * gramsPerUnit * 10) / 10
+  return (
+    <div className="space-y-2">
+      <label className="text-xs font-medium text-text-secondary block">
+        Number of {n === 1 ? unitLabel : plural}:
+      </label>
+      <input
+        type="number"
+        value={count}
+        onChange={e => setCount(e.target.value)}
+        min="0.5"
+        step="0.5"
+        className="w-full px-3 py-2 bg-bg-tertiary border border-border rounded-xl text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary-700/50"
+        placeholder="1"
+      />
+      {n > 0 && (
+        <p className="text-xs text-text-muted">
+          = {totalGrams}g
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function NutritionPage() {
   const { user } = useAuthStore()
+  const queryClient = useQueryClient()
+
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
-  const [summary, setSummary] = useState<DailySummary | null>(null)
-  const [loading, setLoading] = useState(true)
   const [addModal, setAddModal] = useState(false)
   const [addMode, setAddMode] = useState<AddMode>('common')
   const [foodCategory, setFoodCategory] = useState<FoodCategory>('All')
@@ -288,9 +316,10 @@ export function NutritionPage() {
   const [searchResults, setSearchResults] = useState<FoodSearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [selectedFood, setSelectedFood] = useState<FoodSearchResult | null>(null)
+  // unitCount is used when food unit is auto-detected; quantity is used for gram-based input
   const [quantity, setQuantity] = useState('100')
+  const [unitCount, setUnitCount] = useState('1')
   const [mealType, setMealType] = useState<MealType>('BREAKFAST')
-  const [saving, setSaving] = useState(false)
   const [manualFood, setManualFood] = useState<ManualFood>(defaultManual)
   const [servingUnit, setServingUnit] = useState<ServingUnit>('g')
   const [gramsPerPiece, setGramsPerPiece] = useState('100')
@@ -298,36 +327,91 @@ export function NutritionPage() {
   const [editLog, setEditLog] = useState<NutritionLog | null>(null)
   const [editQuantity, setEditQuantity] = useState('')
   const [editSaving, setEditSaving] = useState(false)
-  const [pendingItems, setPendingItems] = useState<PendingItem[]>([])
-  const toast = useToast()
 
-  const fetchNutrition = async (d: string) => {
-    setLoading(true)
-    try {
-      const data = await nutritionApi.getDay(d)
-      setSummary(data)
-    } catch {
-      setSummary(null)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // ── React Query: fetch daily summary ──────────────────────────────────────
+  const { data: summary, isLoading } = useQuery({
+    queryKey: ['nutrition', date],
+    queryFn: () => nutritionApi.getDay(date),
+  })
 
-  // FIX: BUG 1 — silent background refresh returns a promise so callers can await it
-  const refreshNutrition = async (d: string): Promise<void> => {
-    try {
-      const data = await nutritionApi.getDay(d)
-      setSummary(data)
-    } catch { /* ignore — stale data is fine */ }
-  }
+  // ── Mutations ──────────────────────────────────────────────────────────────
+  const addFoodMutation = useMutation({
+    mutationFn: (item: Omit<NutritionLog, 'id' | 'user_id' | 'created_at'>) =>
+      nutritionApi.create(item),
+    onMutate: async (item) => {
+      await queryClient.cancelQueries({ queryKey: ['nutrition', date] })
+      const previous = queryClient.getQueryData<DailySummary>(['nutrition', date])
+      queryClient.setQueryData<DailySummary>(['nutrition', date], (old) =>
+        old ? {
+          ...old,
+          total_calories: old.total_calories + item.calories,
+          total_protein_g: old.total_protein_g + item.protein_g,
+          total_carbs_g: old.total_carbs_g + item.carbs_g,
+          total_fat_g: old.total_fat_g + item.fat_g,
+        } : old
+      )
+      return { previous }
+    },
+    onError: (_err, _item, ctx) => {
+      queryClient.setQueryData(['nutrition', date], ctx?.previous)
+      toast.error('Failed to log food')
+    },
+    onSuccess: (_data, item) => {
+      toast.success(`Added ${item.food_name}!`)
+      queryClient.invalidateQueries({ queryKey: ['nutrition', date] })
+      // Modal stays open — just reset the food selection
+      resetFoodSelection()
+    },
+  })
 
-  // Convert amount + unit to grams
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => nutritionApi.delete(id),
+    onSuccess: () => {
+      toast.success('Removed')
+      queryClient.invalidateQueries({ queryKey: ['nutrition', date] })
+    },
+    onError: () => toast.error('Failed to remove'),
+  })
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
   const toGrams = (amount: number, unit: ServingUnit, gpp: number): number => {
     if (unit === 'piece') return amount * gpp
     return amount * (UNIT_TO_GRAMS[unit] ?? 1)
   }
 
-  useEffect(() => { fetchNutrition(date) }, [date])
+  const calcMacros = (food: FoodSearchResult, grams: number) => {
+    const ratio = grams / 100
+    return {
+      calories: Math.round(food.calories_per_100g * ratio * 10) / 10,
+      protein_g: Math.round(food.protein_per_100g * ratio * 10) / 10,
+      carbs_g: Math.round(food.carbs_per_100g * ratio * 10) / 10,
+      fat_g: Math.round(food.fat_per_100g * ratio * 10) / 10,
+    }
+  }
+
+  // Reset only the food selection (modal stays open)
+  const resetFoodSelection = () => {
+    setSelectedFood(null)
+    setQuantity('100')
+    setUnitCount('1')
+    setServingUnit('g')
+    setGramsPerPiece('100')
+  }
+
+  const closeModal = () => {
+    setAddModal(false)
+    setSelectedFood(null)
+    setSearchQ('')
+    setSearchResults([])
+    setManualFood(defaultManual)
+    setAddMode('common')
+    setCommonSearch('')
+    setFoodCategory('All')
+    setServingUnit('g')
+    setGramsPerPiece('100')
+    setQuantity('100')
+    setUnitCount('1')
+  }
 
   const changeDate = (delta: number) => {
     const d = new Date(date)
@@ -348,29 +432,30 @@ export function NutritionPage() {
     }
   }
 
-  const calcMacros = (food: FoodSearchResult, grams: number) => {
-    const ratio = grams / 100
-    return {
-      calories: Math.round(food.calories_per_100g * ratio * 10) / 10,
-      protein_g: Math.round(food.protein_per_100g * ratio * 10) / 10,
-      carbs_g: Math.round(food.carbs_per_100g * ratio * 10) / 10,
-      fat_g: Math.round(food.fat_per_100g * ratio * 10) / 10,
+  // Compute grams for selected food, accounting for unit detection
+  const getSelectedGrams = (): number => {
+    if (!selectedFood) return 0
+    const foodUnit = detectFoodUnit(selectedFood.name)
+    if (foodUnit) {
+      return (parseFloat(unitCount) || 0) * foodUnit.grams_per_unit
     }
+    return toGrams(parseFloat(quantity) || 0, servingUnit, parseFloat(gramsPerPiece) || 100)
   }
 
-  // Add current food selection to the pending queue (doesn't close modal)
-  const addToPending = () => {
+  const handleAddToMeal = () => {
     if (!selectedFood) return
-    const g = toGrams(parseFloat(quantity) || 1, servingUnit, parseFloat(gramsPerPiece) || 100)
-    const m = calcMacros(selectedFood, g)
-    setPendingItems(prev => [...prev, { food_name: selectedFood.name, quantity_g: g, ...m }])
-    setSelectedFood(null)
-    setQuantity('100')
-    setServingUnit('g')
-    setGramsPerPiece('100')
+    const grams = getSelectedGrams()
+    const m = calcMacros(selectedFood, grams)
+    addFoodMutation.mutate({
+      date,
+      meal_type: mealType,
+      food_name: selectedFood.name,
+      quantity_g: grams,
+      ...m,
+    })
   }
 
-  const addManualToPending = () => {
+  const handleManualAdd = () => {
     const cal100 = parseFloat(manualFood.cal100)
     if (!manualFood.name.trim() || !cal100) {
       toast.error('Name and calories per 100g are required')
@@ -383,51 +468,18 @@ export function NutritionPage() {
       carbs_per_100g: parseFloat(manualFood.carb100) || 0,
       fat_per_100g: parseFloat(manualFood.fat100) || 0,
     }
-    const g = toGrams(parseFloat(manualFood.quantity) || 1, servingUnit, parseFloat(gramsPerPiece) || 100)
-    const m = calcMacros(foodAsCommon, g)
-    setPendingItems(prev => [...prev, { food_name: manualFood.name, quantity_g: g, ...m }])
+    const grams = toGrams(parseFloat(manualFood.quantity) || 1, servingUnit, parseFloat(gramsPerPiece) || 100)
+    const m = calcMacros(foodAsCommon, grams)
+    addFoodMutation.mutate({
+      date,
+      meal_type: mealType,
+      food_name: manualFood.name,
+      quantity_g: grams,
+      ...m,
+    })
     setManualFood(defaultManual)
     setServingUnit('g')
     setGramsPerPiece('100')
-  }
-
-  // Log all queued items at once
-  const logAll = async () => {
-    if (!pendingItems.length) return
-    setSaving(true)
-
-    // FIX: BUG 1 — optimistically update daily totals immediately (<300ms) so UI reflects new food
-    // before the server response arrives
-    const addedCalories = pendingItems.reduce((s, i) => s + i.calories, 0)
-    const addedProtein = pendingItems.reduce((s, i) => s + i.protein_g, 0)
-    const addedCarbs = pendingItems.reduce((s, i) => s + i.carbs_g, 0)
-    const addedFat = pendingItems.reduce((s, i) => s + i.fat_g, 0)
-    setSummary(prev => {
-      const base = prev ?? { date, total_calories: 0, total_protein_g: 0, total_carbs_g: 0, total_fat_g: 0, logs: [] }
-      return {
-        ...base,
-        total_calories: Math.round((base.total_calories + addedCalories) * 10) / 10,
-        total_protein_g: Math.round((base.total_protein_g + addedProtein) * 10) / 10,
-        total_carbs_g: Math.round((base.total_carbs_g + addedCarbs) * 10) / 10,
-        total_fat_g: Math.round((base.total_fat_g + addedFat) * 10) / 10,
-      }
-    })
-
-    try {
-      await Promise.all(
-        pendingItems.map(item => nutritionApi.create({ date, meal_type: mealType, ...item }))
-      )
-      closeModal()
-      toast.success(`${pendingItems.length} food${pendingItems.length > 1 ? 's' : ''} logged!`)
-      // FIX: BUG 1 — await the server refresh so UI shows accurate server data (including log IDs)
-      await refreshNutrition(date)
-    } catch {
-      toast.error('Failed to save — please try again')
-      // Revert optimistic update on failure
-      await refreshNutrition(date)
-    } finally {
-      setSaving(false)
-    }
   }
 
   const openEdit = (log: NutritionLog) => {
@@ -450,7 +502,7 @@ export function NutritionPage() {
         fat_g: Math.round(editLog.fat_g * ratio * 10) / 10,
       })
       setEditLog(null)
-      await refreshNutrition(date)
+      queryClient.invalidateQueries({ queryKey: ['nutrition', date] })
       toast.success('Updated!')
     } catch {
       toast.error('Failed to update')
@@ -459,40 +511,25 @@ export function NutritionPage() {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    try {
-      await nutritionApi.delete(id)
-      await fetchNutrition(date)
-      toast.success('Removed')
-    } catch {
-      toast.error('Failed to remove')
-    }
-  }
-
-  const closeModal = () => {
-    setAddModal(false)
-    setSelectedFood(null)
-    setSearchQ('')
-    setSearchResults([])
-    setManualFood(defaultManual)
-    setAddMode('common')
-    setCommonSearch('')
-    setFoodCategory('All')
-    setServingUnit('g')
-    setGramsPerPiece('100')
-    setQuantity('100')
-    setPendingItems([])
-  }
-
   const groupedLogs = MEAL_TYPES.reduce((acc, m) => {
     acc[m] = summary?.logs?.filter(l => l.meal_type === m) || []
     return acc
   }, {} as Record<MealType, NutritionLog[]>)
 
+  // Macros for the current food selection preview
+  const selectedGrams = selectedFood ? getSelectedGrams() : 0
   const macros = calcMacros(
     selectedFood || { calories_per_100g: 0, protein_per_100g: 0, carbs_per_100g: 0, fat_per_100g: 0 } as any,
-    toGrams(parseFloat(quantity) || 0, servingUnit, parseFloat(gramsPerPiece) || 100)
+    selectedGrams
   )
+
+  // Detected food unit for selected food
+  const detectedUnit = selectedFood ? detectFoodUnit(selectedFood.name) : null
+
+  const openAddModal = (meal: MealType) => {
+    setMealType(meal)
+    setAddModal(true)
+  }
 
   return (
     <div className="page px-4">
@@ -554,15 +591,14 @@ export function NutritionPage() {
         </Card>
       )}
 
-      {/* Meals */}
+      {/* Meals — always show all meal type sections */}
       <div className="space-y-3">
-        {MEAL_TYPES.map(mealType => {
-          const logs = groupedLogs[mealType]
-          if (!logs.length && !loading) return null
+        {MEAL_TYPES.map(mt => {
+          const logs = groupedLogs[mt]
           return (
-            <Card key={mealType} padding="none">
+            <Card key={mt} padding="none">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                <h3 className="font-semibold text-text-primary text-sm">{MEAL_LABELS[mealType]}</h3>
+                <h3 className="font-semibold text-text-primary text-sm">{MEAL_LABELS[mt]}</h3>
                 <span className="text-xs text-text-muted">
                   {Math.round(logs.reduce((a, l) => a + l.calories, 0))} kcal
                 </span>
@@ -587,7 +623,7 @@ export function NutritionPage() {
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => handleDelete(log.id)}
+                        onClick={() => deleteMutation.mutate(log.id)}
                         className="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-accent-red hover:bg-accent-red/10 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -595,21 +631,29 @@ export function NutritionPage() {
                     </div>
                   </motion.div>
                 ))}
-                {!logs.length && loading && (
+                {!logs.length && isLoading && (
                   <div className="px-4 py-3">
                     <div className="skeleton h-10 rounded-lg" />
                   </div>
                 )}
               </div>
+              {/* Per-meal add button — always shown */}
+              <button
+                onClick={() => openAddModal(mt)}
+                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-primary-400 transition-colors px-4 py-2.5 w-full"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add to {MEAL_LABELS[mt]}
+              </button>
             </Card>
           )
         })}
 
-        {!loading && !summary?.logs?.length && (
+        {!isLoading && !summary?.logs?.length && (
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center py-16"
+            className="text-center py-8"
           >
             <motion.div
               animate={{ y: [0, -6, 0] }}
@@ -619,10 +663,7 @@ export function NutritionPage() {
               🥗
             </motion.div>
             <p className="text-text-primary font-semibold mb-1">Nothing logged yet</p>
-            <p className="text-text-muted text-sm mb-4">Track your meals to hit your targets</p>
-            <Button onClick={() => setAddModal(true)}>
-              <Plus className="w-4 h-4" /> Log your first meal
-            </Button>
+            <p className="text-text-muted text-sm">Tap "+ Add to [meal]" above or use Log Food to get started</p>
           </motion.div>
         )}
       </div>
@@ -668,6 +709,16 @@ export function NutritionPage() {
       {/* Add food modal */}
       <Modal open={addModal} onClose={closeModal} title="Log Food">
 
+        {/* Done button row */}
+        <div className="flex justify-end mb-2 -mt-1">
+          <button
+            onClick={closeModal}
+            className="text-xs font-semibold text-primary-400 hover:text-primary-300 transition-colors px-2 py-1"
+          >
+            Done
+          </button>
+        </div>
+
         {/* Mode toggle */}
         <div className="flex gap-1 p-1 bg-bg-tertiary rounded-xl mb-4">
           <button
@@ -706,39 +757,6 @@ export function NutritionPage() {
           </div>
         </div>
 
-        {/* Pending items queue */}
-        {pendingItems.length > 0 && (
-          <div className="mb-4 p-3 bg-bg-tertiary rounded-xl border border-border space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-text-secondary">
-                {pendingItems.length} item{pendingItems.length > 1 ? 's' : ''} queued
-              </span>
-              <span className="text-xs font-bold text-primary-400">
-                {Math.round(pendingItems.reduce((s, i) => s + i.calories, 0))} kcal total
-              </span>
-            </div>
-            {pendingItems.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-text-primary truncate">{item.food_name}</p>
-                  <p className="text-xs text-text-muted">
-                    {item.quantity_g % 1 === 0 ? item.quantity_g : item.quantity_g.toFixed(1)}g · {Math.round(item.calories)} kcal · {Math.round(item.protein_g)}P
-                  </p>
-                </div>
-                <button
-                  onClick={() => setPendingItems(p => p.filter((_, i) => i !== idx))}
-                  className="flex-shrink-0 text-text-muted hover:text-accent-red transition-colors"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-            <Button fullWidth size="sm" loading={saving} onClick={logAll}>
-              Log {pendingItems.length} Food{pendingItems.length > 1 ? 's' : ''}
-            </Button>
-          </div>
-        )}
-
         {/* ── COMMON FOODS MODE ── */}
         {addMode === 'common' && (
           !selectedFood ? (
@@ -773,7 +791,7 @@ export function NutritionPage() {
                   .map((food) => (
                     <button
                       key={food.id}
-                      onClick={() => setSelectedFood(food)}
+                      onClick={() => { setSelectedFood(food); setUnitCount('1'); setQuantity('100') }}
                       className="w-full text-left p-3 rounded-xl bg-bg-tertiary hover:bg-bg-hover transition-colors border border-border"
                     >
                       <p className="text-sm font-medium text-text-primary leading-tight">{food.name}</p>
@@ -792,9 +810,19 @@ export function NutritionPage() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
+              {detectedUnit ? (
+                <UnitQuantityInput
+                  unitLabel={detectedUnit.unit}
+                  plural={detectedUnit.plural ?? `${detectedUnit.unit}s`}
+                  gramsPerUnit={detectedUnit.grams_per_unit}
+                  count={unitCount}
+                  setCount={setUnitCount}
+                />
+              ) : (
+                <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
+              )}
               <MacroPreview macros={macros} />
-              <Button fullWidth onClick={addToPending}>Add to Meal</Button>
+              <Button fullWidth loading={addFoodMutation.isPending} onClick={handleAddToMeal}>Add to Meal</Button>
             </div>
           )
         )}
@@ -818,7 +846,7 @@ export function NutritionPage() {
                 {searchResults.map((food, i) => (
                   <button
                     key={i}
-                    onClick={() => setSelectedFood(food)}
+                    onClick={() => { setSelectedFood(food); setUnitCount('1'); setQuantity('100') }}
                     className="w-full text-left p-3 rounded-xl bg-bg-tertiary hover:bg-bg-hover transition-colors border border-border"
                   >
                     <p className="text-sm font-medium text-text-primary leading-tight truncate">{food.name}</p>
@@ -840,11 +868,19 @@ export function NutritionPage() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-
-              <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
+              {detectedUnit ? (
+                <UnitQuantityInput
+                  unitLabel={detectedUnit.unit}
+                  plural={detectedUnit.plural ?? `${detectedUnit.unit}s`}
+                  gramsPerUnit={detectedUnit.grams_per_unit}
+                  count={unitCount}
+                  setCount={setUnitCount}
+                />
+              ) : (
+                <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
+              )}
               <MacroPreview macros={macros} />
-
-              <Button fullWidth onClick={addToPending}>Add to Meal</Button>
+              <Button fullWidth loading={addFoodMutation.isPending} onClick={handleAddToMeal}>Add to Meal</Button>
             </div>
           )
         )}
@@ -896,7 +932,7 @@ export function NutritionPage() {
               {manualGrams > 0 && manualCal100 > 0 && (
                 <MacroPreview macros={{ calories: preview.cal, protein_g: preview.pro, carbs_g: preview.carb, fat_g: preview.fat }} />
               )}
-              <Button fullWidth onClick={addManualToPending}
+              <Button fullWidth loading={addFoodMutation.isPending} onClick={handleManualAdd}
                 disabled={!manualFood.name.trim() || !manualFood.cal100 || !manualFood.quantity}>
                 Add to Meal
               </Button>

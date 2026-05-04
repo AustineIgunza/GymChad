@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Calendar, ChevronDown, ChevronUp, Dumbbell, BarChart2 } from 'lucide-react'
+import { Calendar, ChevronDown, ChevronUp, Dumbbell, BarChart2, Trash2 } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import { workoutsApi } from '../services/workouts'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
@@ -51,71 +53,78 @@ function aggregateWorkouts(workouts: Workout[], mode: 'months' | 'years'): Aggre
 }
 
 export function HistoryPage() {
-  const [workouts, setWorkouts] = useState<Workout[]>([])
-  const [loading, setLoading] = useState(true)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
+  const [allWorkouts, setAllWorkouts] = useState<Workout[]>([])
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('days')
 
-  const fetchPage = async (p: number, append = false) => {
-    setLoading(true)
-    try {
-      const data = await workoutsApi.list({ page: p, limit: 20 })
-      if (append) setWorkouts(w => [...w, ...data])
-      else setWorkouts(data)
-      setHasMore(data.length === 20)
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
-  }
+  const { data: pageWorkouts = [], isLoading, isFetching } = useQuery({
+    queryKey: ['workouts', page],
+    queryFn: () => workoutsApi.list({ page, limit: 20 }),
+    placeholderData: (prev) => prev,
+  })
 
-  // Load more data for aggregate views
-  const fetchAll = async () => {
-    setLoading(true)
-    try {
+  // Accumulate pages for the days view
+  const workouts: Workout[] = viewMode === 'days'
+    ? (() => {
+        // Merge pageWorkouts into allWorkouts, deduplicating by id
+        const ids = new Set(allWorkouts.map(w => w.id))
+        const newOnes = (pageWorkouts as Workout[]).filter(w => !ids.has(w.id))
+        if (newOnes.length > 0) {
+          setAllWorkouts(prev => [...prev, ...newOnes])
+        }
+        return allWorkouts.length > 0 ? allWorkouts : (pageWorkouts as Workout[])
+      })()
+    : allWorkouts
+
+  const hasMore = (pageWorkouts as Workout[]).length === 20
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => workoutsApi.delete(id),
+    onSuccess: () => {
+      toast.success('Workout deleted')
+      queryClient.invalidateQueries({ queryKey: ['workouts'] })
+      setAllWorkouts([])
+      setPage(1)
+    },
+    onError: () => toast.error('Failed to delete'),
+  })
+
+  const switchView = async (mode: ViewMode) => {
+    setViewMode(mode)
+    if (mode !== 'days' && allWorkouts.length < 100) {
+      // Fetch up to 1000 workouts for aggregate views
       const all: Workout[] = []
       for (let p = 1; p <= 10; p++) {
         const data = await workoutsApi.list({ page: p, limit: 100 })
         all.push(...data)
         if (data.length < 100) break
       }
-      setWorkouts(all)
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchPage(1) }, [])
-
-  const switchView = (mode: ViewMode) => {
-    setViewMode(mode)
-    if (mode !== 'days' && workouts.length < 100) {
-      fetchAll()
+      setAllWorkouts(all)
     }
   }
 
   const loadMore = () => {
-    const next = page + 1
-    setPage(next)
-    fetchPage(next, true)
+    setPage(p => p + 1)
   }
 
-  const grouped = workouts.reduce((acc, w) => {
+  const displayWorkouts: Workout[] = viewMode === 'days'
+    ? (allWorkouts.length > 0 ? allWorkouts : (pageWorkouts as Workout[]))
+    : allWorkouts
+
+  const grouped = displayWorkouts.reduce((acc, w) => {
     const date = new Date(w.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
     if (!acc[date]) acc[date] = []
     acc[date].push(w)
     return acc
   }, {} as Record<string, Workout[]>)
 
-  const monthGroups = viewMode === 'months' ? aggregateWorkouts(workouts, 'months') : []
-  const yearGroups = viewMode === 'years' ? aggregateWorkouts(workouts, 'years') : []
+  const monthGroups = viewMode === 'months' ? aggregateWorkouts(allWorkouts, 'months') : []
+  const yearGroups = viewMode === 'years' ? aggregateWorkouts(allWorkouts, 'years') : []
 
-  const isEmpty = workouts.length === 0
+  const isEmpty = displayWorkouts.length === 0
 
   return (
     <div className="page px-4">
@@ -136,7 +145,7 @@ export function HistoryPage() {
         ))}
       </div>
 
-      {loading && workouts.length === 0 ? (
+      {isLoading && displayWorkouts.length === 0 ? (
         <SkeletonList count={4} />
       ) : isEmpty ? (
         <motion.div
@@ -178,38 +187,72 @@ export function HistoryPage() {
 
                   return (
                     <Card key={w.id} padding="none">
-                      <button
-                        className="w-full flex items-center justify-between p-4 text-left"
-                        onClick={() => setExpandedId(isExpanded ? null : w.id)}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Dumbbell className="w-4 h-4 text-primary-400 flex-shrink-0" />
-                            <p className="font-semibold text-text-primary">{w.label}</p>
-                          </div>
-                          <div className="flex items-center gap-3 text-xs text-text-muted">
-                            <span>{workingSets.length} sets</span>
-                            {totalVolume > 0 && <span>{Math.round(totalVolume).toLocaleString()}kg vol</span>}
-                            {w.duration_min && <span>{w.duration_min}min</span>}
-                          </div>
-                          {muscles.length > 0 && (
-                            <div className="flex gap-1 mt-2 flex-wrap">
-                              {muscles.slice(0, 4).map(m => (
-                                <span
-                                  key={m}
-                                  className="px-2 py-0.5 rounded-full text-xs font-medium"
-                                  style={{ background: `${MUSCLE_COLORS[m!]}18`, color: MUSCLE_COLORS[m!] }}
-                                >
-                                  {m}
-                                </span>
-                              ))}
+                      <div className="flex items-center">
+                        <button
+                          className="flex-1 flex items-center justify-between p-4 text-left"
+                          onClick={() => setExpandedId(isExpanded ? null : w.id)}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Dumbbell className="w-4 h-4 text-primary-400 flex-shrink-0" />
+                              <p className="font-semibold text-text-primary">{w.label}</p>
                             </div>
-                          )}
+                            <div className="flex items-center gap-3 text-xs text-text-muted">
+                              <span>{workingSets.length} sets</span>
+                              {totalVolume > 0 && <span>{Math.round(totalVolume).toLocaleString()}kg vol</span>}
+                              {w.duration_min && <span>{w.duration_min}min</span>}
+                            </div>
+                            {muscles.length > 0 && (
+                              <div className="flex gap-1 mt-2 flex-wrap">
+                                {muscles.slice(0, 4).map(m => (
+                                  <span
+                                    key={m}
+                                    className="px-2 py-0.5 rounded-full text-xs font-medium"
+                                    style={{ background: `${MUSCLE_COLORS[m!]}18`, color: MUSCLE_COLORS[m!] }}
+                                  >
+                                    {m}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {isExpanded
+                            ? <ChevronUp className="w-4 h-4 text-text-muted flex-shrink-0 ml-2" />
+                            : <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0 ml-2" />}
+                        </button>
+                        {/* Delete button */}
+                        <button
+                          className="p-4 text-text-muted hover:text-accent-red transition-colors flex-shrink-0"
+                          onClick={() => setConfirmDeleteId(w.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Confirm delete dialog */}
+                      {confirmDeleteId === w.id && (
+                        <div className="border-t border-border px-4 py-3 flex items-center justify-between gap-3 bg-accent-red/5">
+                          <p className="text-sm text-text-primary">Delete this workout?</p>
+                          <div className="flex gap-2">
+                            <button
+                              className="text-xs text-text-muted hover:text-text-primary transition-colors px-3 py-1.5 rounded-lg bg-bg-tertiary"
+                              onClick={() => setConfirmDeleteId(null)}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              className="text-xs text-white bg-accent-red px-3 py-1.5 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                              disabled={deleteMutation.isPending}
+                              onClick={() => {
+                                setConfirmDeleteId(null)
+                                deleteMutation.mutate(w.id)
+                              }}
+                            >
+                              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+                            </button>
+                          </div>
                         </div>
-                        {isExpanded
-                          ? <ChevronUp className="w-4 h-4 text-text-muted flex-shrink-0 ml-2" />
-                          : <ChevronDown className="w-4 h-4 text-text-muted flex-shrink-0 ml-2" />}
-                      </button>
+                      )}
 
                       {isExpanded && (
                         <motion.div
@@ -255,10 +298,10 @@ export function HistoryPage() {
           {viewMode === 'days' && hasMore && (
             <button
               onClick={loadMore}
-              disabled={loading}
+              disabled={isFetching}
               className="w-full py-3 text-sm text-text-muted hover:text-text-primary transition-colors"
             >
-              {loading ? 'Loading...' : 'Load more'}
+              {isFetching ? 'Loading...' : 'Load more'}
             </button>
           )}
 
@@ -346,7 +389,7 @@ export function HistoryPage() {
             </motion.div>
           ))}
 
-          {loading && workouts.length > 0 && (
+          {isFetching && displayWorkouts.length > 0 && viewMode === 'days' && (
             <div className="text-center py-4 text-text-muted text-sm">Loading...</div>
           )}
         </div>

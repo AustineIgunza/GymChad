@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { supabase } from '../services/supabase'
 import api from '../services/api'
 import type { User } from '../types'
+import { useWorkoutStore } from './workoutStore'
 
 interface AuthState {
   user: User | null
@@ -88,7 +89,8 @@ export const useAuthStore = create<AuthState>()(
         await supabase.auth.signOut()
         set({ user: null })
         // FIX: Proactive — clear persisted workout state on logout so the next user
-        // doesn't see a previous session's active workout
+        // doesn't see a previous session's active workout (both in-memory and localStorage)
+        useWorkoutStore.getState().clearActive()
         localStorage.removeItem('gymchad-active-workout')
       },
     }),

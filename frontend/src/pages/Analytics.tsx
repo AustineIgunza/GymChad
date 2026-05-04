@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
 } from 'recharts'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
 import api from '../services/api'
 import { exercisesApi } from '../services/exercises'
 import { useAuthStore } from '../stores/authStore'
@@ -12,8 +14,7 @@ import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
-import { useToast } from '../stores/uiStore'
-import type { Exercise, BodyMeasurement } from '../types'
+import type { BodyMeasurement } from '../types'
 import { Plus, TrendingDown, TrendingUp, Target, Minus } from 'lucide-react'
 import { MuscleHeatMap } from '../components/analytics/MuscleHeatMap'
 import { RecoveryDashboard } from '../components/analytics/RecoveryDashboard'
@@ -32,6 +33,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 type AnalyticsTab = 'strength' | 'body' | 'nutrition'
 type CalPeriod = '4w' | '3m' | '6m' | '1y'
+type DateRange = '7d' | '30d' | '90d' | 'All'
 
 const CAL_PERIODS: { id: CalPeriod; label: string; days: number }[] = [
   { id: '4w',  label: '4 Weeks', days: 28  },
@@ -40,11 +42,17 @@ const CAL_PERIODS: { id: CalPeriod; label: string; days: number }[] = [
   { id: '1y',  label: '1 Year',   days: 365 },
 ]
 
+const DATE_RANGES: { id: DateRange; label: string; days: number | null }[] = [
+  { id: '7d',  label: '7d',  days: 7   },
+  { id: '30d', label: '30d', days: 30  },
+  { id: '90d', label: '90d', days: 90  },
+  { id: 'All', label: 'All', days: null },
+]
+
 function groupByWeek(data: any[]): any[] {
   const byWeek: Record<string, { calories: number; count: number; target: number | null }> = {}
   for (const d of data) {
     const dt = new Date(d.date)
-    // ISO week key: year-Wxx
     const monday = new Date(dt)
     monday.setDate(dt.getDate() - ((dt.getDay() + 6) % 7))
     const key = monday.toISOString().slice(0, 10)
@@ -60,7 +68,7 @@ function groupByWeek(data: any[]): any[] {
 function groupByMonth(data: any[]): any[] {
   const byMonth: Record<string, { calories: number; count: number; target: number | null }> = {}
   for (const d of data) {
-    const key = d.date.slice(0, 7) // YYYY-MM
+    const key = d.date.slice(0, 7)
     if (!byMonth[key]) byMonth[key] = { calories: 0, count: 0, target: d.target }
     byMonth[key].calories += d.calories
     byMonth[key].count += 1
@@ -68,6 +76,19 @@ function groupByMonth(data: any[]): any[] {
   return Object.entries(byMonth)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, v]) => ({ date: date.slice(5), calories: Math.round(v.calories), target: v.target ? v.target * v.count : null }))
+}
+
+function ChartSkeleton() {
+  return <div className="h-40 animate-pulse bg-bg-tertiary rounded-xl" />
+}
+
+function EmptyChart({ message }: { message: string }) {
+  return (
+    <div className="h-40 flex flex-col items-center justify-center text-text-muted text-sm gap-2">
+      <span className="text-3xl">📊</span>
+      <span>{message}</span>
+    </div>
+  )
 }
 
 const defaultMeasurement = {
@@ -85,59 +106,76 @@ const defaultMeasurement = {
 
 export function AnalyticsPage() {
   const { user } = useAuthStore()
-  const toast = useToast()
+  const queryClient = useQueryClient()
   const [tab, setTab] = useState<AnalyticsTab>('strength')
   const [calPeriod, setCalPeriod] = useState<CalPeriod>('4w')
   const [strengthWeeks, setStrengthWeeks] = useState(12)
-  const [exercises, setExercises] = useState<Exercise[]>([])
   const [selectedEx, setSelectedEx] = useState('')
-  const [strengthData, setStrengthData] = useState<any[]>([])
-  const [volumeData, setVolumeData] = useState<any[]>([])
-  const [calorieData, setCalorieData] = useState<any[]>([])
-  const [macroData, setMacroData] = useState<any>(null)
-  const [bodyData, setBodyData] = useState<BodyMeasurement[]>([])
-  const [fatLossData, setFatLossData] = useState<any>(null)
-  const [measurements, setMeasurements] = useState<BodyMeasurement[]>([])
   const [logModal, setLogModal] = useState(false)
   const [measureForm, setMeasureForm] = useState(defaultMeasurement)
-  const [savingMeasure, setSavingMeasure] = useState(false)
-  const [_loading, setLoading] = useState(true)
+  const [dateRange, setDateRange] = useState<DateRange>('30d')
+  const days = DATE_RANGES.find(r => r.id === dateRange)?.days ?? null
 
-  useEffect(() => {
-    exercisesApi.list().then(exs => {
-      const filtered = exs.filter(e => e.muscle_group !== 'CARDIO')
-      setExercises(filtered)
-      if (filtered.length) setSelectedEx(filtered[0].id)
-    })
-    api.get('/progress/calories', { params: { days: 365 } }).then(r => setCalorieData(r.data)).catch(() => {})
-    api.get('/progress/macros', { params: { days: 7 } }).then(r => setMacroData(r.data)).catch(() => {})
-    setLoading(false)
-  }, [])
+  // Exercises list
+  const { data: exercises = [] } = useQuery({
+    queryKey: ['exercises-list'],
+    queryFn: async () => {
+      const exs = await exercisesApi.list()
+      const filtered = exs.filter((e: any) => e.muscle_group !== 'CARDIO')
+      if (filtered.length && !selectedEx) setSelectedEx(filtered[0].id)
+      return filtered
+    },
+  })
 
-  useEffect(() => {
-    if (tab === 'body') {
-      api.get('/measurements', { params: { days: 365 } }).then(r => {
-        setBodyData(r.data)
-        setMeasurements(r.data)
-      }).catch(() => {})
-      api.get('/progress/fat-loss-projection').then(r => setFatLossData(r.data)).catch(() => {})
-    }
-  }, [tab])
+  // Strength chart
+  const { data: strengthData = [], isLoading: strengthLoading } = useQuery({
+    queryKey: ['strength', selectedEx, strengthWeeks],
+    queryFn: () =>
+      selectedEx
+        ? api.get('/progress/strength', { params: { exercise_id: selectedEx, weeks: strengthWeeks } }).then(r => r.data).catch(() => [])
+        : [],
+    enabled: !!selectedEx,
+  })
 
-  useEffect(() => {
-    if (!selectedEx) return
-    Promise.all([
-      api.get('/progress/strength', { params: { exercise_id: selectedEx, weeks: strengthWeeks } }).then(r => r.data).catch(() => []),
-      api.get('/progress/volume', { params: { exercise_id: selectedEx, weeks: strengthWeeks } }).then(r => r.data).catch(() => []),
-    ]).then(([s, v]) => {
-      setStrengthData(s)
-      setVolumeData(v)
-    })
-  }, [selectedEx, strengthWeeks])
+  // Volume chart
+  const { data: volumeData = [], isLoading: volumeLoading } = useQuery({
+    queryKey: ['volume', selectedEx, strengthWeeks],
+    queryFn: () =>
+      selectedEx
+        ? api.get('/progress/volume', { params: { exercise_id: selectedEx, weeks: strengthWeeks } }).then(r => r.data).catch(() => [])
+        : [],
+    enabled: !!selectedEx,
+  })
 
-  const logMeasurement = async () => {
-    setSavingMeasure(true)
-    try {
+  // Calorie history — always fetch full year, then filter client-side
+  const { data: calorieData = [], isLoading: calorieLoading } = useQuery({
+    queryKey: ['calorie-history'],
+    queryFn: () => api.get('/progress/calories', { params: { days: 365 } }).then(r => r.data).catch(() => []),
+  })
+
+  // Macro averages
+  const { data: macroData, isLoading: macroLoading } = useQuery({
+    queryKey: ['macro-averages', days],
+    queryFn: () => api.get('/progress/macros', { params: { days: days ?? 365 } }).then(r => r.data).catch(() => null),
+  })
+
+  // Body measurements
+  const { data: bodyData = [], isLoading: bodyLoading } = useQuery<BodyMeasurement[]>({
+    queryKey: ['measurements', days],
+    queryFn: () => api.get('/measurements', { params: { days: days ?? 365 } }).then(r => r.data).catch(() => []),
+    enabled: tab === 'body',
+  })
+
+  // Fat loss projection
+  const { data: fatLossData } = useQuery({
+    queryKey: ['fat-loss-projection'],
+    queryFn: () => api.get('/progress/fat-loss-projection').then(r => r.data).catch(() => null),
+    enabled: tab === 'body',
+  })
+
+  // Log measurement mutation
+  const logMeasureMutation = useMutation({
+    mutationFn: async () => {
       const payload: any = { date: measureForm.date }
       if (measureForm.weight_kg) payload.weight_kg = parseFloat(measureForm.weight_kg)
       if (measureForm.body_fat_pct) payload.body_fat_pct = parseFloat(measureForm.body_fat_pct)
@@ -148,47 +186,40 @@ export function AnalyticsPage() {
       if (measureForm.left_thigh_cm) payload.left_thigh_cm = parseFloat(measureForm.left_thigh_cm)
       if (measureForm.right_thigh_cm) payload.right_thigh_cm = parseFloat(measureForm.right_thigh_cm)
       if (measureForm.notes) payload.notes = measureForm.notes
-
       await api.post('/measurements', payload)
-      const r = await api.get('/measurements', { params: { days: 90 } })
-      setBodyData(r.data)
-      setMeasurements(r.data)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['measurements'] })
       setLogModal(false)
       setMeasureForm(defaultMeasurement)
       toast.success('Measurements logged!')
-    } catch {
-      toast.error('Failed to log measurements')
-    } finally {
-      setSavingMeasure(false)
-    }
-  }
+    },
+    onError: () => toast.error('Failed to log measurements'),
+  })
 
-  const deleteMeasurement = async (id: string) => {
-    try {
-      await api.delete(`/measurements/${id}`)
-      setBodyData(d => d.filter((m: any) => m.id !== id))
-      setMeasurements(d => d.filter((m: any) => m.id !== id))
+  // Delete measurement mutation
+  const deleteMeasureMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/measurements/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['measurements'] })
       toast.success('Removed')
-    } catch {
-      toast.error('Failed to remove')
-    }
-  }
+    },
+    onError: () => toast.error('Failed to remove'),
+  })
 
   const item = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } }
   const container = { hidden: {}, show: { transition: { staggerChildren: 0.1 } } }
 
-  const exerciseOptions = exercises.map(e => ({ value: e.id, label: e.name }))
+  const exerciseOptions = exercises.map((e: any) => ({ value: e.id, label: e.name }))
 
-  // Weight trend data for chart
   const weightChartData = bodyData
     .filter((m: any) => m.weight_kg)
     .map((m: any) => ({ date: m.date?.slice(5), weight: m.weight_kg }))
 
-  // Compute goal weight ETA
   let goalWeightEta: string | null = null
   let weeksToGoal: number | null = null
   if (fatLossData && user?.goal_weight_kg && user?.weight_kg) {
-    const weeklyChange = fatLossData.projected_weekly_kg // positive = loss, negative = gain
+    const weeklyChange = fatLossData.projected_weekly_kg
     const diff = user.weight_kg - user.goal_weight_kg
     if (weeklyChange !== 0 && Math.sign(diff) === Math.sign(weeklyChange)) {
       weeksToGoal = Math.abs(diff / weeklyChange)
@@ -198,9 +229,32 @@ export function AnalyticsPage() {
     }
   }
 
+  // Date-range filtered calorie data
+  const filteredCalorieData = (() => {
+    if (!days) return calorieData
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - days)
+    return (calorieData as any[]).filter(d => new Date(d.date) >= cutoff)
+  })()
+
   return (
     <div className="page px-4">
       <PageHeader title="Analytics" subtitle="Track your progress over time" />
+
+      {/* Date range selector */}
+      <div className="flex gap-1 p-1 bg-bg-tertiary rounded-xl mb-4">
+        {DATE_RANGES.map(r => (
+          <button
+            key={r.id}
+            onClick={() => setDateRange(r.id)}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              dateRange === r.id ? 'bg-primary-700 text-white shadow-sm' : 'text-text-muted hover:text-text-primary'
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
 
       <RecoveryDashboard />
 
@@ -252,7 +306,9 @@ export function AnalyticsPage() {
                       </div>
                     </div>
                   </div>
-                  {strengthData.length ? (
+                  {strengthLoading ? (
+                    <ChartSkeleton />
+                  ) : (strengthData as any[]).length ? (
                     <ResponsiveContainer width="100%" height={160}>
                       <LineChart data={strengthData} margin={{ top: 4, right: 4, left: -25, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false} />
@@ -268,16 +324,18 @@ export function AnalyticsPage() {
                   ) : (
                     <div className="h-40 flex flex-col items-center justify-center text-text-muted text-sm gap-2">
                       <span className="text-3xl">💪</span>
-                      <span>Log workouts to track strength</span>
+                      <span>No data yet — start logging!</span>
                     </div>
                   )}
                 </Card>
               </motion.div>
 
-              {volumeData.length > 0 && (
-                <motion.div variants={item}>
-                  <Card padding="md">
-                    <h3 className="font-semibold text-text-primary mb-4">Training Volume</h3>
+              <motion.div variants={item}>
+                <Card padding="md">
+                  <h3 className="font-semibold text-text-primary mb-4">Training Volume</h3>
+                  {volumeLoading ? (
+                    <ChartSkeleton />
+                  ) : (volumeData as any[]).length ? (
                     <ResponsiveContainer width="100%" height={140}>
                       <BarChart data={volumeData} margin={{ top: 0, right: 0, left: -25, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false} />
@@ -287,9 +345,11 @@ export function AnalyticsPage() {
                         <Bar dataKey="volume" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Volume (kg)" isAnimationActive={true} animationDuration={800} />
                       </BarChart>
                     </ResponsiveContainer>
-                  </Card>
-                </motion.div>
-              )}
+                  ) : (
+                    <EmptyChart message="No data yet — start logging!" />
+                  )}
+                </Card>
+              </motion.div>
 
             </motion.div>
           </motion.div>
@@ -310,7 +370,9 @@ export function AnalyticsPage() {
               {/* Weight trend chart */}
               <Card padding="md">
                 <h3 className="font-semibold text-text-primary mb-4">Body Weight Trend</h3>
-                {weightChartData.length > 1 ? (
+                {bodyLoading ? (
+                  <ChartSkeleton />
+                ) : weightChartData.length > 1 ? (
                   <ResponsiveContainer width="100%" height={160}>
                     <LineChart data={weightChartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false} />
@@ -333,7 +395,7 @@ export function AnalyticsPage() {
                 ) : (
                   <div className="h-40 flex flex-col items-center justify-center text-text-muted text-sm gap-2">
                     <span className="text-3xl">⚖️</span>
-                    <span>Log body weight to see trend</span>
+                    <span>No data yet — start logging!</span>
                     <Button size="sm" variant="outline" onClick={() => setLogModal(true)}>
                       <Plus className="w-3.5 h-3.5" /> First entry
                     </Button>
@@ -377,7 +439,6 @@ export function AnalyticsPage() {
                     ))}
                   </div>
 
-                  {/* Goal weight ETA */}
                   {goalWeightEta && weeksToGoal && (
                     <div className="p-3 rounded-xl bg-accent-green/5 border border-accent-green/15">
                       <div className="flex items-center gap-2 mb-1">
@@ -396,13 +457,15 @@ export function AnalyticsPage() {
               )}
 
               {/* Recent measurements */}
-              {measurements.length > 0 && (
+              {bodyData.length === 0 && !bodyLoading ? (
+                <div className="text-center py-8 text-text-muted text-sm">No data yet — start logging!</div>
+              ) : bodyData.length > 0 ? (
                 <Card padding="none">
                   <div className="px-4 py-3 border-b border-border">
                     <h3 className="font-semibold text-text-primary text-sm">Measurement History</h3>
                   </div>
                   <div className="divide-y divide-border">
-                    {measurements.slice(0, 10).map((m: any) => (
+                    {bodyData.slice(0, 10).map((m: any) => (
                       <div key={m.id} className="px-4 py-3">
                         <div className="flex items-start justify-between">
                           <div>
@@ -416,7 +479,7 @@ export function AnalyticsPage() {
                             </div>
                           </div>
                           <button
-                            onClick={() => deleteMeasurement(m.id)}
+                            onClick={() => deleteMeasureMutation.mutate(m.id)}
                             className="text-text-muted hover:text-accent-red transition-colors ml-2 flex-shrink-0"
                           >
                             <Minus className="w-4 h-4" />
@@ -426,7 +489,7 @@ export function AnalyticsPage() {
                     ))}
                   </div>
                 </Card>
-              )}
+              ) : null}
             </div>
           </motion.div>
         )}
@@ -452,14 +515,16 @@ export function AnalyticsPage() {
                       ))}
                     </div>
                   </div>
-                  {(() => {
+                  {calorieLoading ? (
+                    <ChartSkeleton />
+                  ) : (() => {
                     const period = CAL_PERIODS.find(p => p.id === calPeriod)!
                     const cutoff = new Date()
                     cutoff.setDate(cutoff.getDate() - period.days)
-                    const filtered = calorieData.filter(d => new Date(d.date) >= cutoff)
+                    const filtered = (calorieData as any[]).filter(d => new Date(d.date) >= cutoff)
                     const chartData = period.days <= 30 ? filtered : period.days <= 90 ? groupByWeek(filtered) : groupByMonth(filtered)
-                    const targetLine = period.days <= 90 ? user?.calorie_target : null // target line only meaningful per-day/week
-                    return calorieData.length ? (
+                    const targetLine = period.days <= 90 ? user?.calorie_target : null
+                    return (calorieData as any[]).length ? (
                       <ResponsiveContainer width="100%" height={160}>
                         <BarChart data={chartData} margin={{ top: 0, right: 0, left: -25, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false} />
@@ -474,19 +539,18 @@ export function AnalyticsPage() {
                         </BarChart>
                       </ResponsiveContainer>
                     ) : (
-                      <div className="h-40 flex flex-col items-center justify-center text-text-muted text-sm gap-2">
-                        <span className="text-3xl">📊</span>
-                        <span>Log nutrition to see calorie data</span>
-                      </div>
+                      <EmptyChart message="No data yet — start logging!" />
                     )
                   })()}
                 </Card>
               </motion.div>
 
-              {macroData && (
-                <motion.div variants={item}>
-                  <Card padding="md">
-                    <h3 className="font-semibold text-text-primary mb-3">7-Day Macro Averages</h3>
+              <motion.div variants={item}>
+                <Card padding="md">
+                  <h3 className="font-semibold text-text-primary mb-3">Macro Averages</h3>
+                  {macroLoading ? (
+                    <ChartSkeleton />
+                  ) : macroData ? (
                     <div className="grid grid-cols-3 gap-3">
                       {[
                         { label: 'Protein', avg: macroData.avg_protein_g, target: macroData.target_protein_g, color: '#3b82f6' },
@@ -512,9 +576,11 @@ export function AnalyticsPage() {
                         )
                       })}
                     </div>
-                  </Card>
-                </motion.div>
-              )}
+                  ) : (
+                    <EmptyChart message="No data yet — start logging!" />
+                  )}
+                </Card>
+              </motion.div>
 
             </motion.div>
           </motion.div>
@@ -552,7 +618,7 @@ export function AnalyticsPage() {
           </div>
           <Input label="Notes (optional)" placeholder="Fasted morning weight..." value={measureForm.notes}
             onChange={e => setMeasureForm(f => ({ ...f, notes: e.target.value }))} />
-          <Button fullWidth loading={savingMeasure} onClick={logMeasurement}>Save Measurements</Button>
+          <Button fullWidth loading={logMeasureMutation.isPending} onClick={() => logMeasureMutation.mutate()}>Save Measurements</Button>
         </div>
       </Modal>
     </div>

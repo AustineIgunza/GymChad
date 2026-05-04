@@ -57,6 +57,10 @@ class DailySummary(BaseModel):
     total_protein_g: float
     total_carbs_g: float
     total_fat_g: float
+    calorie_target: int | None = None
+    protein_target: int | None = None
+    carbs_target: int | None = None
+    fat_target: int | None = None
     logs: list[NutritionLogResponse]
 
 

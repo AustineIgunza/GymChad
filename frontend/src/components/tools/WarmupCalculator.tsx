@@ -68,7 +68,8 @@ export function WarmupCalculator({ onClose, defaultWeight }: Props) {
             {sets.map(s => (
               <tr key={s.set_number} className="border-b border-border/50">
                 <td className="py-2 text-text-secondary">Warm {s.set_number}</td>
-                <td className="py-2 text-right text-text-muted">{Math.round(s.pct * 100)}%</td>
+                {/* FIX: pct is already an integer (e.g. 40, 60, 75) — no need to multiply by 100 */}
+                <td className="py-2 text-right text-text-muted">{s.pct}%</td>
                 <td className="py-2 text-right font-semibold text-text-primary">{s.weight.toFixed(1)} {unit}</td>
                 <td className="py-2 text-right text-text-secondary">{s.reps} reps</td>
               </tr>
