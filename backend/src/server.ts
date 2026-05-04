@@ -638,6 +638,69 @@ app.get("/api/v1/workouts/history/:exerciseId", async (req, res, next) => {
   }
 });
 
+// GET /api/v1/workouts/today-plan — must be before /workouts/:id
+app.get("/api/v1/workouts/today-plan", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const activeSplit = await prisma.split.findFirst({
+      where: { userId, isActive: true },
+      include: {
+        days: {
+          include: { exercises: { include: { exercise: true }, orderBy: { orderIndex: "asc" } } },
+          orderBy: { dayNumber: "asc" },
+        },
+      },
+    });
+    if (!activeSplit || activeSplit.days.length === 0) { res.json(null); return; }
+
+    const splitDayIds = activeSplit.days.map((d) => d.id);
+    const lastWorkout = await prisma.workout.findFirst({
+      where: { userId, splitDayId: { in: splitDayIds }, deletedAt: null },
+      orderBy: { date: "desc" },
+    });
+
+    let nextDay = activeSplit.days[0];
+    if (lastWorkout?.splitDayId) {
+      const lastDayIdx = activeSplit.days.findIndex((d) => d.id === lastWorkout.splitDayId);
+      if (lastDayIdx !== -1) {
+        nextDay = activeSplit.days[(lastDayIdx + 1) % activeSplit.days.length];
+      }
+    }
+
+    const exercisesWithBest = await Promise.all(
+      nextDay.exercises.map(async (sde, i) => {
+        const bestSet = await prisma.workoutSet.findFirst({
+          where: { exerciseId: sde.exerciseId, isWarmup: false, workout: { userId, deletedAt: null } },
+          orderBy: [{ workout: { date: "desc" } }, { weightKg: "desc" }],
+          include: { workout: true },
+        });
+        return {
+          exercise_id: sde.exerciseId,
+          exercise_name: sde.exercise.name,
+          muscle_group: sde.exercise.muscleGroup,
+          order: i,
+          target_sets: 3,
+          target_reps_min: 8,
+          target_reps_max: 12,
+          notes: null,
+          previous_best: bestSet
+            ? { weight_kg: bestSet.weightKg, reps: bestSet.reps, date: bestSet.workout.date.toISOString().slice(0, 10) }
+            : null,
+        };
+      })
+    );
+
+    res.json({
+      split_id: activeSplit.id,
+      split_name: activeSplit.name,
+      split_day_id: nextDay.id,
+      split_day_label: nextDay.label,
+      day_number: nextDay.dayNumber,
+      exercises: exercisesWithBest,
+    });
+  } catch (error) { next(error); }
+});
+
 app.post("/api/v1/workouts", async (req, res, next) => {
   try {
     const userId = getUserId(req);
@@ -1146,6 +1209,47 @@ app.delete("/api/v1/nutrition/:id", async (req, res, next) => {
   }
 });
 
+// AI Sessions
+app.get("/api/v1/ai/sessions", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const sessions = await prisma.aISession.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    });
+    res.json(toSnake(sessions));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/v1/ai/sessions", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const { sessionId, messages } = z
+      .object({
+        sessionId: z.string().optional(),
+        messages: z.array(z.object({ role: z.string(), content: z.string() })),
+      })
+      .parse(req.body);
+    let session;
+    if (sessionId) {
+      const existing = await prisma.aISession.findFirst({ where: { id: sessionId, userId } });
+      if (existing) {
+        session = await prisma.aISession.update({ where: { id: sessionId }, data: { messages } });
+      } else {
+        session = await prisma.aISession.create({ data: { userId, messages } });
+      }
+    } else {
+      session = await prisma.aISession.create({ data: { userId, messages } });
+    }
+    res.json(toSnake(session));
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Cardio (stored in Event table so no migration needed)
 const CARDIO_MET: Record<string, number> = {
   recumbent_bike: 5.5, upright_bike: 7.0, spinning: 8.5, treadmill: 9.0,
@@ -1243,6 +1347,39 @@ app.post("/api/v1/cardio/activity", async (req, res, next) => {
   }
 });
 
+// /cardio/steps must be before /cardio to avoid route conflict
+app.get("/api/v1/cardio/steps", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const days = Number(req.query.days ?? 30);
+    const start = new Date();
+    start.setUTCDate(start.getUTCDate() - (days - 1));
+    start.setUTCHours(0, 0, 0, 0);
+    const rows = await prisma.event.findMany({
+      where: { userId, event: "STEPS_LOG", timestamp: { gte: start } },
+      orderBy: { timestamp: "desc" },
+    });
+    // Keep only the latest log per day
+    const byDate = new Map<string, number>();
+    for (const r of rows) {
+      const date = r.timestamp.toISOString().slice(0, 10);
+      if (!byDate.has(date)) byDate.set(date, (r.metadata as any)?.steps ?? 0);
+    }
+    // Build result for every day in range
+    const result: Array<{ date: string; steps: number; calories: number }> = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start);
+      d.setUTCDate(start.getUTCDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      const steps = byDate.get(key) ?? 0;
+      result.push({ date: key, steps, calories: Math.round(steps * 0.04) });
+    }
+    res.json(result.reverse()); // most recent first
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/v1/cardio", async (req, res, next) => {
   try {
     const userId = getUserId(req);
@@ -1321,66 +1458,324 @@ app.delete("/api/v1/cardio/:id", async (req, res, next) => {
   }
 });
 
-// AI Coach (SSE streaming)
+// AI Coach (SSE streaming) — deep context: passes real workout/nutrition/cardio data
 app.post("/api/v1/ai/coach", async (req, res, next) => {
   try {
-    const { message, conversationHistory } = z
+    // Accept both 'history' (what the frontend sends) and 'conversationHistory'
+    const parsed = z
       .object({
         message: z.string().min(1),
+        history: z
+          .array(z.object({ role: z.string(), content: z.string() }))
+          .optional(),
         conversationHistory: z
           .array(z.object({ role: z.string(), content: z.string() }))
-          .default([]),
+          .optional(),
       })
       .parse(req.body);
+    const { message } = parsed;
+    const conversationHistory = parsed.history ?? parsed.conversationHistory ?? [];
+
     const userId = getUserId(req);
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { splits: true },
-    });
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    // Fetch user + recent data in parallel
+    const [user, recentWorkouts, nutritionLogs, recentCardio] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, include: { splits: true } }),
+      prisma.workout.findMany({
+        where: { userId, deletedAt: null, date: { gte: sevenDaysAgo } },
+        include: { sets: { include: { exercise: true } } },
+        orderBy: { date: "desc" },
+        take: 7,
+      }),
+      prisma.nutritionLog.findMany({
+        where: { userId, date: { gte: sevenDaysAgo } },
+      }),
+      prisma.event.findMany({
+        where: { userId, event: "CARDIO_SESSION", timestamp: { gte: sevenDaysAgo } },
+        orderBy: { timestamp: "desc" },
+        take: 10,
+      }),
+    ]);
+
     if (!user) {
       res.status(404).json({ error: "User not found" });
       return;
     }
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    // Build workout summary
+    const workoutSummary = recentWorkouts.length > 0
+      ? recentWorkouts.map((w) => {
+          const workingSets = w.sets.filter((s) => !s.isWarmup);
+          const exercises = [...new Set(w.sets.map((s) => s.exercise.name))].slice(0, 4).join(", ");
+          const vol = workingSets.reduce((a, s) => a + s.weightKg * s.reps, 0);
+          return `  ${w.date.toISOString().slice(0, 10)}: ${w.label} — ${workingSets.length} working sets, ${Math.round(vol)}kg vol (${exercises})`;
+        }).join("\n")
+      : "  None this week";
+
+    // Build nutrition 7-day averages
+    const nutByDay = new Map<string, { cal: number; p: number; c: number; f: number }>();
+    for (const l of nutritionLogs) {
+      const key = l.date.toISOString().slice(0, 10);
+      const cur = nutByDay.get(key) ?? { cal: 0, p: 0, c: 0, f: 0 };
+      cur.cal += l.calories; cur.p += l.proteinG; cur.c += l.carbsG; cur.f += l.fatG;
+      nutByDay.set(key, cur);
+    }
+    const nutCount = nutByDay.size || 1;
+    const nutTotals = [...nutByDay.values()].reduce(
+      (a, d) => ({ cal: a.cal + d.cal, p: a.p + d.p, c: a.c + d.c, f: a.f + d.f }),
+      { cal: 0, p: 0, c: 0, f: 0 }
+    );
+    const nutAvg = {
+      cal: Math.round(nutTotals.cal / nutCount),
+      p: Math.round(nutTotals.p / nutCount),
+      c: Math.round(nutTotals.c / nutCount),
+      f: Math.round(nutTotals.f / nutCount),
+    };
+
+    // Build cardio summary
+    const cardioSummary = recentCardio.length > 0
+      ? recentCardio.map((e) => {
+          const m = (e.metadata as any) ?? {};
+          return `  ${e.timestamp.toISOString().slice(0, 10)}: ${m.cardioType} ${m.durationMin}min (~${m.caloriesBurned} kcal)`;
+        }).join("\n")
+      : "  None this week";
+
     const systemPrompt = [
-      "You are GymAI, an expert fitness and nutrition coach.",
-      `User goal: ${user.goal}`,
-      `Calorie target: ${user.calorieTarget ?? user.tdee ?? "unknown"} kcal/day`,
+      "You are GymAI, an expert fitness and nutrition coach. You have access to the user's actual training data from this week — reference it directly in your advice.",
+      "",
+      "## User Profile",
+      `Goal: ${user.goal} | Calorie target: ${user.calorieTarget ?? user.tdee ?? "not set"} kcal/day`,
       user.weightKg ? `Weight: ${user.weightKg}kg` : null,
       user.heightCm ? `Height: ${user.heightCm}cm` : null,
       user.age ? `Age: ${user.age}` : null,
-      `Active splits: ${user.splits.filter((s: any) => s.isActive).length} / ${user.splits.length} total`,
-      "Give concise, data-driven advice. Be specific about weights, reps, sets, and calories.",
+      user.sex ? `Sex: ${user.sex}` : null,
+      `Active program: ${user.splits.filter((s: any) => s.isActive).length > 0 ? "yes" : "no program active"}`,
+      "",
+      "## This Week's Workouts",
+      workoutSummary,
+      "",
+      `## This Week's Nutrition (avg over ${nutCount} tracked days)`,
+      `  Calories: ${nutAvg.cal} kcal | Protein: ${nutAvg.p}g | Carbs: ${nutAvg.c}g | Fat: ${nutAvg.f}g`,
+      nutCount < 4 ? `  (Only ${nutCount} days logged — encourage user to track more consistently)` : null,
+      "",
+      "## This Week's Cardio",
+      cardioSummary,
+      "",
+      "Be concise and direct. Reference specific numbers from their data. Give actionable recommendations.",
     ]
-      .filter(Boolean)
+      .filter((v) => v !== null)
       .join("\n");
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const stream = await anthropic.messages.stream({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 1200,
+      max_tokens: 1500,
       system: systemPrompt,
       messages: [
         ...conversationHistory,
         { role: "user", content: message },
       ] as any,
     });
+
     for await (const event of stream) {
       if (
         event.type === "content_block_delta" &&
         event.delta.type === "text_delta"
       ) {
-        res.write(`data: ${JSON.stringify({ token: event.delta.text })}\n\n`);
+        // Escape embedded newlines so each token fits on a single SSE data line
+        const escaped = event.delta.text.replace(/\n/g, "\\n");
+        res.write(`data: ${escaped}\n\n`);
       }
     }
-    res.write("event: done\ndata: {}\n\n");
+    res.write("data: [DONE]\n\n");
     res.end();
   } catch (error) {
     next(error);
   }
+});
+
+// ── Tools (pure computation, no DB) ──────────────────────────────────────────
+
+const WARMUP_PROTOCOL = [
+  { pct: 40, reps: 5 },
+  { pct: 60, reps: 3 },
+  { pct: 75, reps: 2 },
+  { pct: 90, reps: 1 },
+];
+
+app.post("/api/v1/tools/warmup-calculator", (req, res) => {
+  const { workingWeight, unit } = z
+    .object({ workingWeight: z.number().positive(), unit: z.enum(["kg", "lb"]).default("kg") })
+    .parse(req.body);
+  // Round to nearest 2.5 increment for realism
+  const round = (w: number) => Math.round(w / 2.5) * 2.5;
+  const warmupSets = WARMUP_PROTOCOL.map((step, i) => ({
+    set_number: i + 1,
+    pct: step.pct,
+    weight: round(workingWeight * step.pct / 100),
+    reps: step.reps,
+    unit,
+  }));
+  res.json({ working_weight: workingWeight, unit, warmup_sets: warmupSets });
+});
+
+const PLATES_KG = [25, 20, 15, 10, 5, 2.5, 1.25];
+const PLATES_LB = [45, 35, 25, 10, 5, 2.5, 1.25];
+
+app.post("/api/v1/tools/plate-calculator", (req, res) => {
+  const { targetWeight, barWeight, unit } = z
+    .object({
+      targetWeight: z.number().positive(),
+      barWeight: z.number().nonnegative().default(20),
+      unit: z.enum(["kg", "lb"]).default("kg"),
+    })
+    .parse(req.body);
+  const plates = unit === "kg" ? PLATES_KG : PLATES_LB;
+  let remaining = (targetWeight - barWeight) / 2;
+  const platesPerSide: { weight: number; count: number }[] = [];
+  let actualWeightPerSide = 0;
+  for (const plate of plates) {
+    if (remaining <= 0) break;
+    const count = Math.floor(remaining / plate);
+    if (count > 0) {
+      platesPerSide.push({ weight: plate, count });
+      actualWeightPerSide += plate * count;
+      remaining -= plate * count;
+    }
+  }
+  const actualWeight = barWeight + actualWeightPerSide * 2;
+  res.json({
+    target_weight: targetWeight,
+    bar_weight: barWeight,
+    weight_per_side: actualWeightPerSide,
+    plates_per_side: platesPerSide,
+    unit,
+    achievable: Math.abs(actualWeight - targetWeight) < 0.01,
+    actual_weight: actualWeight,
+  });
+});
+
+app.post("/api/v1/tools/1rm-calculator", (req, res) => {
+  const { weight, reps } = z
+    .object({ weight: z.number().positive(), reps: z.number().int().min(1).max(36) })
+    .parse(req.body);
+  const epley   = weight * (1 + reps / 30);
+  const brzycki = reps < 37 ? weight * 36 / (37 - reps) : epley;
+  const lombardi = weight * Math.pow(reps, 0.1);
+  const average = (epley + brzycki + lombardi) / 3;
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const PCT_CHART = [100, 95, 90, 85, 80, 75, 70, 65, 60, 55, 50];
+  const percentageChart = PCT_CHART.map(pct => ({
+    pct,
+    weight: round1(average * pct / 100),
+    reps: pct === 100 ? 1 : pct >= 95 ? 2 : pct >= 90 ? 3 : pct >= 85 ? 4 : pct >= 80 ? 5 : pct >= 75 ? 6 : pct >= 70 ? 8 : pct >= 65 ? 10 : pct >= 60 ? 12 : pct >= 55 ? 15 : 20,
+  }));
+  res.json({
+    weight,
+    reps,
+    epley: round1(epley),
+    brzycki: round1(brzycki),
+    lombardi: round1(lombardi),
+    average: round1(average),
+    percentage_chart: percentageChart,
+  });
+});
+
+// ── Buddy System ──────────────────────────────────────────────────────────────
+// Sessions are ephemeral (in-memory) — no DB migration required
+
+import { createServer } from "http";
+import { WebSocketServer, WebSocket } from "ws";
+import { randomBytes } from "crypto";
+
+interface BuddySession {
+  id: string;
+  code: string;
+  hostUserId: string;
+  partnerUserId: string | null;
+  connections: Map<string, WebSocket>;
+  createdAt: number;
+}
+
+const buddySessions = new Map<string, BuddySession>();
+const buddyCodes = new Map<string, string>(); // code → sessionId
+
+function generateCode(): string {
+  return randomBytes(3).toString("hex").toUpperCase(); // 6 hex chars
+}
+
+function cleanupOldSessions() {
+  const cutoff = Date.now() - 4 * 60 * 60 * 1000; // 4h TTL
+  for (const [id, session] of buddySessions) {
+    if (session.createdAt < cutoff) {
+      buddyCodes.delete(session.code);
+      buddySessions.delete(id);
+    }
+  }
+}
+
+app.post("/api/v1/buddy/create", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    cleanupOldSessions();
+    let code = generateCode();
+    while (buddyCodes.has(code)) code = generateCode();
+    const id = randomBytes(8).toString("hex");
+    const session: BuddySession = {
+      id, code, hostUserId: userId,
+      partnerUserId: null,
+      connections: new Map(),
+      createdAt: Date.now(),
+    };
+    buddySessions.set(id, session);
+    buddyCodes.set(code, id);
+    res.status(201).json({ session_id: id, code, host_user_id: userId, partner_user_id: null });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/v1/buddy/join/:code", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const code = req.params.code.toUpperCase();
+    const sessionId = buddyCodes.get(code);
+    if (!sessionId) return res.status(404).json({ error: "Session not found" });
+    const session = buddySessions.get(sessionId);
+    if (!session) return res.status(404).json({ error: "Session expired" });
+    if (session.partnerUserId && session.partnerUserId !== userId) {
+      return res.status(409).json({ error: "Session already has a partner" });
+    }
+    session.partnerUserId = userId;
+    // Notify host that partner joined
+    const hostWs = session.connections.get(session.hostUserId);
+    if (hostWs?.readyState === WebSocket.OPEN) {
+      hostWs.send(JSON.stringify({ type: "partner_joined", partner_user_id: userId }));
+    }
+    res.json({ session_id: session.id, code: session.code, host_user_id: session.hostUserId, partner_user_id: userId });
+  } catch (error) { next(error); }
+});
+
+app.get("/api/v1/buddy/session/:id", async (req, res, next) => {
+  try {
+    const session = buddySessions.get(req.params.id);
+    if (!session) return res.status(404).json({ error: "Session not found" });
+    res.json({ session_id: session.id, code: session.code, host_user_id: session.hostUserId, partner_user_id: session.partnerUserId });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/v1/buddy/session/:id/end", async (req, res, next) => {
+  try {
+    const session = buddySessions.get(req.params.id);
+    if (session) {
+      buddyCodes.delete(session.code);
+      buddySessions.delete(session.id);
+    }
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 });
 
 // ── Error handler ─────────────────────────────────────────────────────────────
@@ -1401,6 +1796,45 @@ app.use(
   }
 );
 
-app.listen(port, () => {
+// ── HTTP + WebSocket server ────────────────────────────────────────────────────
+
+const httpServer = createServer(app);
+
+// WebSocket endpoint: ws://<host>/api/v1/buddy/ws/<sessionId>/<userId>
+const wss = new WebSocketServer({ server: httpServer, path: "/api/v1/buddy/ws" });
+
+wss.on("connection", (ws: WebSocket, req) => {
+  // URL format: /api/v1/buddy/ws/:sessionId/:userId
+  const parts = (req.url ?? "").split("/").filter(Boolean);
+  // parts = ["api", "v1", "buddy", "ws", sessionId, userId]
+  const sessionId = parts[4];
+  const userId = parts[5];
+
+  const session = buddySessions.get(sessionId ?? "");
+  if (!session || !userId) {
+    ws.close(4004, "Session not found");
+    return;
+  }
+
+  session.connections.set(userId, ws);
+
+  ws.on("message", (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      // Relay message to the other participant
+      for (const [uid, conn] of session.connections) {
+        if (uid !== userId && conn.readyState === WebSocket.OPEN) {
+          conn.send(JSON.stringify(msg));
+        }
+      }
+    } catch { /* ignore malformed */ }
+  });
+
+  ws.on("close", () => {
+    session.connections.delete(userId);
+  });
+});
+
+httpServer.listen(port, () => {
   console.log(`GymChad API listening on ${port}`);
 });

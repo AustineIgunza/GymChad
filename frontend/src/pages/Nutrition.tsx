@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, Search, ChevronLeft, ChevronRight, Trash2, X, PencilLine, Star, Pencil } from 'lucide-react'
+import { Plus, Search, ChevronLeft, ChevronRight, Trash2, X, PencilLine, Star, Pencil, BookMarked } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { nutritionApi } from '../services/nutrition'
@@ -13,7 +13,7 @@ import { MacroRing } from '../components/ui/MacroRing'
 import { PageHeader } from '../components/ui/PageHeader'
 import { NutritionIntelligence } from '../components/nutrition/NutritionIntelligence'
 import { detectFoodUnit } from '../utils/foodUnits'
-import type { DailySummary, NutritionLog, FoodSearchResult, MealType } from '../types'
+import type { DailySummary, NutritionLog, FoodSearchResult, CustomFood, MealType } from '../types'
 
 const MEAL_LABELS: Record<MealType, string> = {
   BREAKFAST: '🌅 Breakfast', LUNCH: '☀️ Lunch', DINNER: '🌙 Dinner',
@@ -166,7 +166,7 @@ const COMMON_FOODS: CommonFood[] = [
 
 const FOOD_CATEGORIES: FoodCategory[] = ['All', 'Protein', 'Carbs', 'Dairy', 'Vegetables', 'Fruits', 'Fats', 'Legumes', 'Supplements']
 
-type AddMode = 'common' | 'search' | 'manual'
+type AddMode = 'common' | 'search' | 'manual' | 'myfoods'
 type ServingUnit = 'g' | 'ml' | 'oz' | 'piece' | 'cup' | 'tbsp' | 'tsp'
 
 const UNIT_LABELS: Record<ServingUnit, string> = {
@@ -327,6 +327,9 @@ export function NutritionPage() {
   const [editLog, setEditLog] = useState<NutritionLog | null>(null)
   const [editQuantity, setEditQuantity] = useState('')
   const [editSaving, setEditSaving] = useState(false)
+  // My Foods state
+  const [saveToLibrary, setSaveToLibrary] = useState(false)
+  const [savingToLibrary, setSavingToLibrary] = useState(false)
 
   // ── React Query: fetch daily summary ──────────────────────────────────────
   const { data: summary, isLoading } = useQuery({
@@ -373,6 +376,21 @@ export function NutritionPage() {
     onError: () => toast.error('Failed to remove'),
   })
 
+  // ── Custom Foods (My Library) ─────────────────────────────────────────────────
+  const { data: customFoods = [] } = useQuery<CustomFood[]>({
+    queryKey: ['custom-foods'],
+    queryFn: () => nutritionApi.getCustomFoods(),
+  })
+
+  const deleteCustomMutation = useMutation({
+    mutationFn: (id: string) => nutritionApi.deleteCustomFood(id),
+    onSuccess: () => {
+      toast.success('Removed from library')
+      queryClient.invalidateQueries({ queryKey: ['custom-foods'] })
+    },
+    onError: () => toast.error('Failed to remove'),
+  })
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   const toGrams = (amount: number, unit: ServingUnit, gpp: number): number => {
     if (unit === 'piece') return amount * gpp
@@ -411,6 +429,26 @@ export function NutritionPage() {
     setGramsPerPiece('100')
     setQuantity('100')
     setUnitCount('1')
+    setSaveToLibrary(false)
+  }
+
+  const saveSearchFoodToLibrary = async (food: FoodSearchResult) => {
+    setSavingToLibrary(true)
+    try {
+      await nutritionApi.createCustomFood({
+        name: food.name,
+        calories_per_100g: food.calories_per_100g,
+        protein_per_100g: food.protein_per_100g,
+        carbs_per_100g: food.carbs_per_100g,
+        fat_per_100g: food.fat_per_100g,
+      } as any)
+      toast.success('Saved to My Foods!')
+      queryClient.invalidateQueries({ queryKey: ['custom-foods'] })
+    } catch {
+      toast.error('Failed to save to library')
+    } finally {
+      setSavingToLibrary(false)
+    }
   }
 
   const changeDate = (delta: number) => {
@@ -455,7 +493,7 @@ export function NutritionPage() {
     })
   }
 
-  const handleManualAdd = () => {
+  const handleManualAdd = async () => {
     const cal100 = parseFloat(manualFood.cal100)
     if (!manualFood.name.trim() || !cal100) {
       toast.error('Name and calories per 100g are required')
@@ -467,6 +505,16 @@ export function NutritionPage() {
       protein_per_100g: parseFloat(manualFood.pro100) || 0,
       carbs_per_100g: parseFloat(manualFood.carb100) || 0,
       fat_per_100g: parseFloat(manualFood.fat100) || 0,
+    }
+    // Optionally save to custom food library
+    if (saveToLibrary) {
+      try {
+        await nutritionApi.createCustomFood(foodAsCommon as any)
+        queryClient.invalidateQueries({ queryKey: ['custom-foods'] })
+        toast.success(`Saved "${manualFood.name}" to My Foods!`)
+      } catch {
+        toast.error('Could not save to library (food logged anyway)')
+      }
     }
     const grams = toGrams(parseFloat(manualFood.quantity) || 1, servingUnit, parseFloat(gramsPerPiece) || 100)
     const m = calcMacros(foodAsCommon, grams)
@@ -480,6 +528,7 @@ export function NutritionPage() {
     setManualFood(defaultManual)
     setServingUnit('g')
     setGramsPerPiece('100')
+    setSaveToLibrary(false)
   }
 
   const openEdit = (log: NutritionLog) => {
@@ -723,21 +772,27 @@ export function NutritionPage() {
         <div className="flex gap-1 p-1 bg-bg-tertiary rounded-xl mb-4">
           <button
             onClick={() => { setAddMode('common'); setSelectedFood(null) }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'common' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
+            className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'common' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
           >
-            <Star className="w-3.5 h-3.5" /> Common
+            <Star className="w-3 h-3" /> Common
           </button>
           <button
             onClick={() => { setAddMode('search'); setSelectedFood(null) }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'search' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
+            className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'search' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
           >
-            <Search className="w-3.5 h-3.5" /> Search
+            <Search className="w-3 h-3" /> Search
           </button>
           <button
             onClick={() => { setAddMode('manual'); setSelectedFood(null) }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'manual' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
+            className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'manual' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
           >
-            <PencilLine className="w-3.5 h-3.5" /> Manual
+            <PencilLine className="w-3 h-3" /> Manual
+          </button>
+          <button
+            onClick={() => { setAddMode('myfoods'); setSelectedFood(null) }}
+            className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-medium transition-all ${addMode === 'myfoods' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-muted'}`}
+          >
+            <BookMarked className="w-3 h-3" /> My Foods
           </button>
         </div>
 
@@ -823,6 +878,13 @@ export function NutritionPage() {
               )}
               <MacroPreview macros={macros} />
               <Button fullWidth loading={addFoodMutation.isPending} onClick={handleAddToMeal}>Add to Meal</Button>
+              <button
+                onClick={() => saveSearchFoodToLibrary(selectedFood)}
+                disabled={savingToLibrary}
+                className="w-full text-xs text-text-muted hover:text-primary-400 transition-colors py-1 text-center"
+              >
+                {savingToLibrary ? 'Saving…' : '+ Save to My Foods'}
+              </button>
             </div>
           )
         )}
@@ -881,6 +943,13 @@ export function NutritionPage() {
               )}
               <MacroPreview macros={macros} />
               <Button fullWidth loading={addFoodMutation.isPending} onClick={handleAddToMeal}>Add to Meal</Button>
+              <button
+                onClick={() => saveSearchFoodToLibrary(selectedFood)}
+                disabled={savingToLibrary}
+                className="w-full text-xs text-text-muted hover:text-primary-400 transition-colors py-1 text-center"
+              >
+                {savingToLibrary ? 'Saving…' : '+ Save to My Foods'}
+              </button>
             </div>
           )
         )}
@@ -932,6 +1001,16 @@ export function NutritionPage() {
               {manualGrams > 0 && manualCal100 > 0 && (
                 <MacroPreview macros={{ calories: preview.cal, protein_g: preview.pro, carbs_g: preview.carb, fat_g: preview.fat }} />
               )}
+              {/* Save to library toggle */}
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={saveToLibrary}
+                  onChange={e => setSaveToLibrary(e.target.checked)}
+                  className="w-4 h-4 accent-purple-600 rounded"
+                />
+                <span className="text-xs text-text-secondary">Save to My Foods library</span>
+              </label>
               <Button fullWidth loading={addFoodMutation.isPending} onClick={handleManualAdd}
                 disabled={!manualFood.name.trim() || !manualFood.cal100 || !manualFood.quantity}>
                 Add to Meal
@@ -939,6 +1018,76 @@ export function NutritionPage() {
             </div>
           )
         })()}
+
+        {/* ── MY FOODS MODE ── */}
+        {addMode === 'myfoods' && (
+          !selectedFood ? (
+            <div className="space-y-3">
+              {customFoods.length === 0 ? (
+                <div className="text-center py-8">
+                  <BookMarked className="w-8 h-8 mx-auto mb-3 text-text-disabled" />
+                  <p className="text-sm text-text-primary font-semibold mb-1">No saved foods yet</p>
+                  <p className="text-xs text-text-muted">Use Manual entry and check "Save to My Foods"<br />or tap "+ Save to My Foods" on any search result.</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                  {customFoods.map(food => (
+                    <div key={food.id} className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedFood({
+                            id: food.id,
+                            name: food.name,
+                            calories_per_100g: food.calories_per_100g,
+                            protein_per_100g: food.protein_per_100g,
+                            carbs_per_100g: food.carbs_per_100g,
+                            fat_per_100g: food.fat_per_100g,
+                          })
+                          setUnitCount('1')
+                          setQuantity('100')
+                        }}
+                        className="flex-1 text-left p-3 rounded-xl bg-bg-tertiary hover:bg-bg-hover transition-colors border border-border"
+                      >
+                        <p className="text-sm font-medium text-text-primary leading-tight">{food.name}</p>
+                        <p className="text-xs text-text-muted mt-0.5">
+                          {food.calories_per_100g} kcal · {food.protein_per_100g}g P · {food.carbs_per_100g}g C · {food.fat_per_100g}g F per 100g
+                        </p>
+                      </button>
+                      <button
+                        onClick={() => deleteCustomMutation.mutate(food.id)}
+                        className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-accent-red hover:bg-accent-red/10 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-semibold text-text-primary text-sm leading-snug flex-1">{selectedFood.name}</p>
+                <button onClick={() => setSelectedFood(null)} className="text-text-muted hover:text-text-primary flex-shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              {detectedUnit ? (
+                <UnitQuantityInput
+                  unitLabel={detectedUnit.unit}
+                  plural={detectedUnit.plural ?? `${detectedUnit.unit}s`}
+                  gramsPerUnit={detectedUnit.grams_per_unit}
+                  count={unitCount}
+                  setCount={setUnitCount}
+                />
+              ) : (
+                <ServingInput quantity={quantity} setQuantity={setQuantity} servingUnit={servingUnit} setServingUnit={setServingUnit} gramsPerPiece={gramsPerPiece} setGramsPerPiece={setGramsPerPiece} />
+              )}
+              <MacroPreview macros={macros} />
+              <Button fullWidth loading={addFoodMutation.isPending} onClick={handleAddToMeal}>Add to Meal</Button>
+            </div>
+          )
+        )}
       </Modal>
     </div>
   )

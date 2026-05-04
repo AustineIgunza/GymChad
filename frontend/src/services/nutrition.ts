@@ -16,12 +16,12 @@ export const nutritionApi = {
 
   delete: (id: string) => api.delete(`/nutrition/${id}`),
 
-  getCustomFoods: () => api.get<CustomFood[]>('/nutrition/custom').then(r => r.data),
+  getCustomFoods: () => api.get<CustomFood[]>('/foods/custom').then(r => r.data),
 
   createCustomFood: (data: Omit<CustomFood, 'id' | 'user_id' | 'created_at'>) =>
-    api.post<CustomFood>('/nutrition/custom', data).then(r => r.data),
+    api.post<CustomFood>('/foods/custom', data).then(r => r.data),
 
-  deleteCustomFood: (id: string) => api.delete(`/nutrition/custom/${id}`),
+  deleteCustomFood: (id: string) => api.delete(`/foods/custom/${id}`),
 
   searchFoods: (q: string) =>
     api.get<FoodSearchResult[]>('/foods/search', { params: { q } }).then(r => r.data),

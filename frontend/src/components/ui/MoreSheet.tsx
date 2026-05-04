@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   BarChart2, Calendar, Layers, BookOpen, Dumbbell,
-  Trophy, Wrench, Users, Settings, ChevronRight, X
+  Trophy, Wrench, Users, Settings, ChevronRight, X, Activity
 } from 'lucide-react'
 
 interface MoreSheetProps {
@@ -24,6 +24,7 @@ const sections = [
     label: 'Performance',
     items: [
       { to: '/analytics', icon: BarChart2, label: 'Analytics' },
+      { to: '/cardio',    icon: Activity,  label: 'Cardio'    },
       { to: '/challenges', icon: Trophy, label: 'Challenges' },
     ]
   },

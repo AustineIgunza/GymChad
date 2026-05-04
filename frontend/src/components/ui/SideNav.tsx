@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Dumbbell, UtensilsCrossed, BarChart2, Settings, ClipboardList, History, Calendar, Wrench, Brain, Users, Trophy } from 'lucide-react'
+import { Home, Dumbbell, UtensilsCrossed, BarChart2, Settings, ClipboardList, History, Calendar, Wrench, Brain, Users, Trophy, Activity } from 'lucide-react'
 import { clsx } from 'clsx'
 
 type NavItem = { to: string; icon: React.ElementType; label: string }
@@ -17,6 +17,7 @@ const navSections: NavSection[] = [
     label: 'Track',
     items: [
       { to: '/nutrition', icon: UtensilsCrossed, label: 'Nutrition' },
+      { to: '/cardio',    icon: Activity,         label: 'Cardio'    },
       { to: '/history',   icon: History,          label: 'History'   },
       { to: '/splits',    icon: ClipboardList,    label: 'Splits'    },
       { to: '/analytics', icon: BarChart2,        label: 'Analytics' },

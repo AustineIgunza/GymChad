@@ -24,6 +24,7 @@ const SplitsPage = lazy(() => import('./pages/Splits').then(m => ({ default: m.S
 const HistoryPage = lazy(() => import('./pages/History').then(m => ({ default: m.HistoryPage })))
 const SchedulePage = lazy(() => import('./pages/Schedule').then(m => ({ default: m.SchedulePage })))
 const ToolsPage = lazy(() => import('./pages/Tools').then(m => ({ default: m.ToolsPage })))
+const CardioPage = lazy(() => import('./pages/Cardio').then(m => ({ default: m.CardioPage })))
 const ProgramPage = lazy(() => import('./pages/Program'))
 const BuddyWorkoutPage = lazy(() => import('./pages/BuddyWorkout'))
 const ChallengesPage = lazy(() => import('./pages/Challenges'))
@@ -227,6 +228,15 @@ function AppRoutes() {
             <AppShell>
               <RouteErrorBoundary routeName="Tools">
                 <PageSuspense><PageTransition><ToolsPage /></PageTransition></PageSuspense>
+              </RouteErrorBoundary>
+            </AppShell>
+          </ProtectedRoute>
+        } />
+        <Route path="/cardio" element={
+          <ProtectedRoute>
+            <AppShell>
+              <RouteErrorBoundary routeName="Cardio">
+                <PageSuspense><PageTransition><CardioPage /></PageTransition></PageSuspense>
               </RouteErrorBoundary>
             </AppShell>
           </ProtectedRoute>
