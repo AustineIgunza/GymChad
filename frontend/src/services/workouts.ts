@@ -1,5 +1,5 @@
 import api from './api'
-import type { Workout, WorkoutSet } from '../types'
+import type { Workout, WorkoutSet, TodayPlan } from '../types'
 
 export const workoutsApi = {
   list: (params?: { page?: number; limit?: number; date_from?: string; date_to?: string }) =>
@@ -40,4 +40,6 @@ export const workoutsApi = {
     api.get<any[]>(`/workouts/history/${exerciseId}`, { params: { sessions } }).then(r => r.data),
 
   recommendations: () => api.get<any[]>('/workouts/recommendations').then(r => r.data),
+
+  todayPlan: () => api.get<TodayPlan | null>('/workouts/today-plan').then(r => r.data),
 }

@@ -44,6 +44,33 @@ class WorkoutSetResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PreviousBest(BaseModel):
+    weight_kg: float
+    reps: int
+    date: str  # ISO date string e.g. "2026-04-28"
+
+
+class TodayPlanExercise(BaseModel):
+    exercise_id: str
+    exercise_name: str
+    muscle_group: str
+    order: int
+    target_sets: int
+    target_reps_min: int
+    target_reps_max: int
+    notes: str | None = None
+    previous_best: PreviousBest | None = None
+
+
+class TodayPlanResponse(BaseModel):
+    split_id: str
+    split_name: str
+    split_day_id: str
+    split_day_label: str
+    day_number: int
+    exercises: list[TodayPlanExercise]
+
+
 class WorkoutCreate(BaseModel):
     label: str
     split_day_id: str | None = None

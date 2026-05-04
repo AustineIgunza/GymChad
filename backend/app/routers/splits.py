@@ -17,6 +17,7 @@ def _sde_to_dict(sde: SplitDayExercise) -> dict:
     d = {c.name: getattr(sde, c.name) for c in sde.__table__.columns}
     if sde.exercise:
         d["exercise"] = {"id": sde.exercise.id, "name": sde.exercise.name, "muscle_group": sde.exercise.muscle_group.value}
+    d["order_index"] = d.get("order", 0)  # alias for frontend TypeScript type compatibility
     return d
 
 

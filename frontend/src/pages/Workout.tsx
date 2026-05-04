@@ -1,47 +1,55 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Minus, X, Check, ChevronDown, ChevronUp, Search, Timer, Dumbbell, Bike, Trash2, Bell, SkipForward, MessageSquare } from 'lucide-react'
+import {
+  Plus, X, ChevronDown, Search, Dumbbell, Bike, Trash2, Check, Loader2,
+} from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import { workoutsApi } from '../services/workouts'
 import { exercisesApi } from '../services/exercises'
-import { splitsApi } from '../services/splits'
-import toast from 'react-hot-toast'
-import { useUIStore } from '../stores/uiStore'
-import { useWorkoutStore } from '../stores/workoutStore'
 import api from '../services/api'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
-import type { Exercise, Workout, CardioSession, CardioType, Split, ParsedSet } from '../types'
-import { formatWeight, weightStep } from '../utils/units'
+import { RestTimer } from '../components/workout/RestTimer'
+import { PrCelebration } from '../components/workout/PrCelebration'
+import { PostWorkoutModal } from '../components/workout/PostWorkoutModal'
 import { VoiceLogger } from '../components/workout/VoiceLogger'
+import type { Exercise, Workout, CardioSession, CardioType, ParsedSet, TodayPlan } from '../types'
+import { formatWeight } from '../utils/units'
+import { useUIStore } from '../stores/uiStore'
+import { useWorkoutStore } from '../stores/workoutStore'
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type Phase = 'idle' | 'active' | 'finishing'
 
 interface LiveSet {
   id?: string
-  exercise_id: string
-  exercise_name: string
-  set_number: number
-  reps: number
-  weight_kg: number
-  rpe?: number | null
-  is_warmup: boolean
+  weight: string
+  reps: string
   saved: boolean
-  // FIX: BUG 3 — track in-flight API calls per set to prevent duplicate submissions
-  saving?: boolean
-  set_type?: 'normal' | 'warmup' | 'dropset' | 'superset'
-  superset_group?: number | null
-  notes?: string
-  showNotes?: boolean
+  is_warmup: boolean
+  saving: boolean
+  set_number: number
 }
 
 interface ExerciseBlock {
-  exercise: Exercise
+  exercise_id: string
+  exercise_name: string
+  muscle_group: string
   sets: LiveSet[]
-  expanded: boolean
-  prevBest?: { weight_kg: number; reps: number } | null
-  recentHistory?: { date: string; sets: { weight_kg: number; reps: number; is_warmup: boolean }[] }[]
+  prevBest: string
+  recentHistory: any[]
+  collapsed: boolean
 }
+
+interface PR { exerciseName: string; weight_kg: number; reps: number }
+
+// ── Cardio constants ───────────────────────────────────────────────────────────
 
 const CARDIO_TYPES: { value: CardioType; label: string; icon: string }[] = [
   { value: 'recumbent_bike', label: 'Recumbent Bike', icon: '🚲' },
@@ -68,7 +76,7 @@ interface CardioForm {
   cardio_type: CardioType
   duration_min: string
   level: string
-  rpm: string        // stored as string to allow ranges like "60-80"
+  rpm: string
   speed_kmh: string
   incline_pct: string
   notes: string
@@ -84,66 +92,176 @@ const defaultCardioForm: CardioForm = {
   notes: '',
 }
 
-const REST_PRESETS = [60, 90, 120, 150, 180]
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-// Detect which split day to train next based on recent workout labels
-function detectNextSplitDay(recentWorkouts: Workout[], split: Split): number {
-  const sortedDays = [...split.days].sort((a, b) => a.day_number - b.day_number)
-  // Walk recent workouts newest-first to find last trained day
-  for (const wo of recentWorkouts) {
-    const label = wo.label || ''
-    for (let i = 0; i < sortedDays.length; i++) {
-      if (sortedDays[i].label && label.includes(sortedDays[i].label)) {
-        return (i + 1) % sortedDays.length
-      }
-    }
-  }
-  return 0 // default to day 1
+function formatElapsed(s: number): string {
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
 }
 
-// Beep using Web Audio API
-function playBeep() {
-  try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.frequency.value = 880
-    gain.gain.setValueAtTime(0.3, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
-    osc.start(ctx.currentTime)
-    osc.stop(ctx.currentTime + 0.4)
-  } catch { /* ignore */ }
+// ── WorkoutStartModal ──────────────────────────────────────────────────────────
+
+function WorkoutStartModal({ open, todayPlan, onStartFromSplit, onStartBlank, onClose }: {
+  open: boolean
+  todayPlan: TodayPlan | null | undefined
+  onStartFromSplit: () => void
+  onStartBlank: () => void
+  onClose: () => void
+}) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-40" onClick={onClose} />
+          <motion.div
+            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+            className="fixed bottom-0 left-0 right-0 z-50 bg-bg-card rounded-t-3xl p-6"
+          >
+            <div className="w-12 h-1 bg-border rounded-full mx-auto mb-4" />
+            <h2 className="text-lg font-bold text-text-primary mb-4">Start Workout</h2>
+
+            {todayPlan && (
+              <button onClick={onStartFromSplit}
+                className="w-full bg-primary-700 text-white rounded-2xl p-4 text-left mb-3 hover:bg-primary-600 transition-colors">
+                <p className="font-bold text-base">{todayPlan.split_day_label}</p>
+                <p className="text-sm text-white/70 mt-0.5">
+                  {todayPlan.exercises.slice(0, 3).map(e => e.exercise_name).join(' · ')}
+                  {todayPlan.exercises.length > 3 ? ` +${todayPlan.exercises.length - 3} more` : ''}
+                </p>
+              </button>
+            )}
+
+            <button onClick={onStartBlank}
+              className="w-full bg-bg-tertiary border border-border text-text-primary rounded-2xl p-4 text-left hover:bg-bg-secondary transition-colors">
+              <p className="font-bold">Empty Workout</p>
+              <p className="text-sm text-text-muted mt-0.5">Add exercises manually</p>
+            </button>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  )
 }
+
+// ── SetRow ─────────────────────────────────────────────────────────────────────
+
+interface SetRowProps {
+  set: LiveSet
+  setIdx: number
+  blockIdx: number
+  onWeightChange: (val: string) => void
+  onRepsChange: (val: string) => void
+  onTick: () => void
+  onRemove: () => void
+  onToggleWarmup: () => void
+  useKg: boolean
+}
+
+function SetRow({ set, onWeightChange, onRepsChange, onTick, onRemove, onToggleWarmup }: SetRowProps) {
+  return (
+    <div className={`grid grid-cols-[28px_1fr_1fr_36px] gap-2 items-center mb-2 px-1 py-1 rounded-xl transition-colors ${set.saved ? 'bg-green-500/8' : ''}`}>
+      {/* Set number / warmup toggle */}
+      <button
+        onClick={onToggleWarmup}
+        className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition-colors ${set.is_warmup ? 'bg-yellow-500/20 text-yellow-400' : 'bg-bg-tertiary text-text-muted'}`}
+      >
+        {set.is_warmup ? 'W' : set.set_number}
+      </button>
+
+      {/* Weight input */}
+      <input
+        type="number"
+        inputMode="decimal"
+        value={set.weight}
+        onChange={e => onWeightChange(e.target.value)}
+        onFocus={e => e.target.select()}
+        className="w-full text-center bg-bg-tertiary rounded-xl py-2.5 text-sm font-semibold text-text-primary border border-transparent focus:border-primary-700 outline-none"
+        placeholder="0"
+      />
+
+      {/* Reps input */}
+      <input
+        type="number"
+        inputMode="numeric"
+        value={set.reps}
+        onChange={e => onRepsChange(e.target.value)}
+        onFocus={e => e.target.select()}
+        className="w-full text-center bg-bg-tertiary rounded-xl py-2.5 text-sm font-semibold text-text-primary border border-transparent focus:border-primary-700 outline-none"
+        placeholder="0"
+      />
+
+      {/* Tick / spinner */}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={onTick}
+          disabled={set.saving}
+          className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
+            set.saving
+              ? 'border-2 border-border opacity-50'
+              : set.saved
+                ? 'bg-primary-700'
+                : 'border-2 border-border hover:border-primary-700'
+          }`}
+        >
+          {set.saving
+            ? <Loader2 className="w-4 h-4 text-text-muted animate-spin" />
+            : <Check className={`w-4 h-4 ${set.saved ? 'text-white' : 'text-text-muted/40'}`} />
+          }
+        </button>
+        {!set.saved && (
+          <button
+            onClick={onRemove}
+            className="w-6 h-6 flex items-center justify-center text-text-muted/30 hover:text-red-400 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Main Page ──────────────────────────────────────────────────────────────────
 
 export function WorkoutPage() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const { useKg } = useUIStore()
+  const { activeWorkout: storedWorkout, setActiveWorkout: storeSetWorkout, clearActive, startTime: storedStartTime } = useWorkoutStore()
+
+  // Phase state
+  const [phase, setPhase] = useState<Phase>('idle')
   const [tab, setTab] = useState<'lift' | 'cardio'>('lift')
+
+  // Workout state
   const [workout, setWorkout] = useState<Workout | null>(null)
   const [blocks, setBlocks] = useState<ExerciseBlock[]>([])
-  const [exercises, setExercises] = useState<Exercise[]>([])
-  const [search, setSearch] = useState('')
+  const [startTime, setStartTime] = useState<number | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  const [workoutLabel, setWorkoutLabel] = useState('')
+
+  // UI state
+  const [showStartModal, setShowStartModal] = useState(false)
+  const [showRestTimer, setShowRestTimer] = useState(false)
   const [pickModal, setPickModal] = useState(false)
+  const [search, setSearch] = useState('')
   const [muscleFilter, setMuscleFilter] = useState('All')
-  const [timer, setTimer] = useState(0)
-  const [timerRunning, setTimerRunning] = useState(false)
-  const [loading, setLoading] = useState(false)
-  // FIX: BUG 5 — guard against double workout creation
-  const creatingWorkoutRef = useRef(false)
-  // FIX: BUG 5 — guard against double "Complete Workout" tap
-  const finishingRef = useRef(false)
-  const [activeSplit, setActiveSplit] = useState<Split | null>(null)
-  const [recentWorkouts, setRecentWorkouts] = useState<Workout[]>([])
-  // Rest timer
-  const [restSeconds, setRestSeconds] = useState<number | null>(null)
-  const [restDuration, setRestDuration] = useState(90)
-  const restRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [exercises, setExercises] = useState<Exercise[]>([])
+
+  // Post-workout state
+  const [durationOnFinish, setDurationOnFinish] = useState(0)
+  const [prs, setPrs] = useState<PR[]>([])
+  const [tomorrowPlan, setTomorrowPlan] = useState<TodayPlan | null>(null)
+  const [tomorrowLoading, setTomorrowLoading] = useState(false)
+
   // PR celebration
-  const [prCelebration, setPrCelebration] = useState<{ show: boolean; weight: number; reps: number; exerciseName: string }>({ show: false, weight: 0, reps: 0, exerciseName: '' })
-  // Session notes
-  const [sessionNotes, setSessionNotes] = useState('')
-  const { showRpe, useKg } = useUIStore()
-  const { activeWorkout: storedWorkout, setActiveWorkout: storeSetWorkout, clearActive } = useWorkoutStore()
+  const [prShow, setPrShow] = useState(false)
+  const [prData, setPrData] = useState({ weight: 0, reps: 0, exerciseName: '' })
 
   // Cardio
   const [cardioForm, setCardioForm] = useState<CardioForm>(defaultCardioForm)
@@ -151,18 +269,25 @@ export function WorkoutPage() {
   const [cardioSessions, setCardioSessions] = useState<CardioSession[]>([])
   const [cardioLoading, setCardioLoading] = useState(false)
 
+  const creatingRef = useRef(false)
+  const finishingRef = useRef(false)
   const today = new Date().toISOString().split('T')[0]
 
-  // Workout timer
+  // ── Today's plan query ──
+  const { data: todayPlan } = useQuery({
+    queryKey: ['today-plan'],
+    queryFn: workoutsApi.todayPlan,
+    staleTime: 1000 * 60 * 10,
+  })
+
+  // ── Elapsed timer ──
   useEffect(() => {
-    if (!timerRunning) return
-    const id = setInterval(() => setTimer(t => t + 1), 1000)
+    if (phase !== 'active' || !startTime) return
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000)
     return () => clearInterval(id)
-  }, [timerRunning])
+  }, [phase, startTime])
 
-  const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-
-  // Request notification permission & fetch data on mount
+  // ── Load exercises + restore active session ──
   useEffect(() => {
     const controller = new AbortController()
     const { signal } = controller
@@ -171,84 +296,60 @@ export function WorkoutPage() {
       Notification.requestPermission()
     }
 
-    const load = async () => {
-      const exs = await exercisesApi.list(signal).catch(() => [])
+    exercisesApi.list(signal).catch(() => []).then(exs => {
       if (signal.aborted) return
       setExercises(exs)
-      // FIX: BUG 5 — restore active workout from Zustand store if user navigated away mid-workout
-      // storedWorkout is read inside the callback so exercises are already in state
-      if (storedWorkout && !workout) {
+
+      // Restore active workout from store
+      if (storedWorkout && phase === 'idle') {
         setWorkout(storedWorkout)
-        setTimerRunning(true)
-        // Refetch workout's sets from backend to rebuild blocks
+        setWorkoutLabel(storedWorkout.label || 'Workout')
+        const st = storedStartTime ?? Date.now()
+        setStartTime(st)
+        setPhase('active')
+
         workoutsApi.get(storedWorkout.id).then(w => {
           if (signal.aborted || !w.sets?.length) return
           const byExercise: Record<string, LiveSet[]> = {}
+          const exMap: Record<string, { name: string; muscle: string }> = {}
           for (const s of w.sets) {
             if (!s.exercise_id) continue
-            if (!byExercise[s.exercise_id]) byExercise[s.exercise_id] = []
+            if (!byExercise[s.exercise_id]) {
+              byExercise[s.exercise_id] = []
+              exMap[s.exercise_id] = {
+                name: s.exercise?.name || '',
+                muscle: s.exercise?.muscle_group || '',
+              }
+            }
             byExercise[s.exercise_id].push({
               id: String(s.id),
-              exercise_id: s.exercise_id,
-              exercise_name: s.exercise?.name || '',
-              set_number: s.set_number,
-              reps: s.reps,
-              weight_kg: s.weight_kg,
-              rpe: s.rpe,
-              is_warmup: s.is_warmup,
+              weight: String(s.weight_kg),
+              reps: String(s.reps),
               saved: true,
+              is_warmup: s.is_warmup,
+              saving: false,
+              set_number: s.set_number,
             })
           }
-          const restored: ExerciseBlock[] = Object.entries(byExercise).map(([exId, sets]) => {
-            const ex = exs.find(e => e.id === exId) || { id: exId, name: sets[0]?.exercise_name, muscle_group: 'OTHER' } as any
-            return { exercise: ex, sets, expanded: true, prevBest: null }
-          })
+          const restored: ExerciseBlock[] = Object.entries(byExercise).map(([exId, sets]) => ({
+            exercise_id: exId,
+            exercise_name: exMap[exId]?.name || '',
+            muscle_group: exMap[exId]?.muscle || '',
+            sets,
+            prevBest: '',
+            recentHistory: [],
+            collapsed: false,
+          }))
           setBlocks(restored)
         }).catch(() => {})
       }
-
-      splitsApi.list().then(splits => {
-        if (signal.aborted) return
-        const active = splits.find(s => s.is_active) || null
-        setActiveSplit(active)
-      }).catch(() => {})
-
-      // Fetch recent workouts to detect which split day is next
-      api.get('/workouts', { params: { days: 14 }, signal })
-        .then(r => {
-          if (signal.aborted) return
-          setRecentWorkouts(Array.isArray(r.data) ? r.data : r.data?.workouts || [])
-        })
-        .catch(() => {})
-    }
-
-    load()
+    })
 
     return () => controller.abort()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Rest timer countdown
-  useEffect(() => {
-    if (restSeconds === null) return
-    if (restSeconds <= 0) {
-      setRestSeconds(null)
-      playBeep()
-      if (Notification.permission === 'granted') {
-        new Notification('Rest over! 💪', { body: 'Time for your next set', icon: '/favicon.ico' })
-      }
-      return
-    }
-    const id = setTimeout(() => setRestSeconds(s => (s !== null ? s - 1 : null)), 1000)
-    restRef.current = id
-    return () => clearTimeout(id)
-  }, [restSeconds])
-
-  const stopRest = () => {
-    if (restRef.current) clearTimeout(restRef.current)
-    setRestSeconds(null)
-  }
-
+  // ── Cardio loader ──
   const fetchCardioSessions = useCallback(async () => {
     setCardioLoading(true)
     try {
@@ -263,6 +364,279 @@ export function WorkoutPage() {
     if (tab === 'cardio') fetchCardioSessions()
   }, [tab, fetchCardioSessions])
 
+  // ── Computed ──
+  const totalVolume = blocks
+    .flatMap(b => b.sets)
+    .filter(s => s.saved && !s.is_warmup)
+    .reduce((sum, s) => sum + parseFloat(s.weight || '0') * parseInt(s.reps || '0'), 0)
+
+  const totalSets = blocks.flatMap(b => b.sets).filter(s => s.saved).length
+
+  // ── Set mutation helpers ──
+  const updateSet = (blockIdx: number, setIdx: number, patch: Partial<LiveSet>) => {
+    setBlocks(prev => {
+      const next = [...prev]
+      next[blockIdx] = {
+        ...next[blockIdx],
+        sets: next[blockIdx].sets.map((s, i) => i === setIdx ? { ...s, ...patch } : s),
+      }
+      return next
+    })
+  }
+
+  const addSet = (blockIdx: number) => {
+    setBlocks(prev => {
+      const next = [...prev]
+      const block = next[blockIdx]
+      const last = block.sets[block.sets.length - 1]
+      next[blockIdx] = {
+        ...block,
+        sets: [...block.sets, {
+          weight: last?.weight ?? '0',
+          reps: last?.reps ?? '8',
+          saved: false,
+          is_warmup: false,
+          saving: false,
+          set_number: block.sets.length + 1,
+        }],
+      }
+      return next
+    })
+  }
+
+  const removeSet = async (blockIdx: number, setIdx: number) => {
+    const set = blocks[blockIdx].sets[setIdx]
+    if (set.id && workout) {
+      try {
+        await workoutsApi.deleteSet(workout.id, set.id)
+      } catch {
+        toast.error('Failed to remove set')
+        return
+      }
+    }
+    setBlocks(prev => {
+      const next = [...prev]
+      const filtered = next[blockIdx].sets.filter((_, i) => i !== setIdx)
+      if (filtered.length === 0) {
+        return next.filter((_, i) => i !== blockIdx)
+      }
+      next[blockIdx] = {
+        ...next[blockIdx],
+        sets: filtered.map((s, i) => ({ ...s, set_number: i + 1 })),
+      }
+      return next
+    })
+  }
+
+  const toggleCollapse = (idx: number) => {
+    setBlocks(prev => prev.map((b, i) => i === idx ? { ...b, collapsed: !b.collapsed } : b))
+  }
+
+  // ── Core tick (save) logic ──
+  const handleTick = async (blockIdx: number, setIdx: number) => {
+    const block = blocks[blockIdx]
+    const set = block.sets[setIdx]
+    if (set.saving || !workout) return
+
+    const w = parseFloat(set.weight)
+    const r = parseInt(set.reps)
+    if (isNaN(w) || isNaN(r) || r < 1) {
+      toast.error('Enter weight and reps first')
+      return
+    }
+
+    updateSet(blockIdx, setIdx, { saving: true })
+
+    try {
+      const payload = {
+        exercise_id: block.exercise_id,
+        set_number: set.set_number,
+        weight_kg: w,
+        reps: r,
+        is_warmup: set.is_warmup,
+      }
+
+      let savedSet: any
+      if (set.id) {
+        savedSet = await workoutsApi.updateSet(workout.id, set.id, payload)
+      } else {
+        savedSet = await workoutsApi.addSet(workout.id, payload)
+      }
+
+      // Check for PR
+      if (savedSet.is_pr) {
+        setPrs(prev => [...prev, { exerciseName: block.exercise_name, weight_kg: w, reps: r }])
+        setPrData({ weight: w, reps: r, exerciseName: block.exercise_name })
+        setPrShow(true)
+      }
+
+      updateSet(blockIdx, setIdx, { saved: true, saving: false, id: savedSet.id })
+
+      if (!set.is_warmup) {
+        setShowRestTimer(true)
+      }
+    } catch {
+      updateSet(blockIdx, setIdx, { saving: false })
+      toast.error('Failed to save set — check connection')
+    }
+  }
+
+  // ── Add exercise from picker ──
+  const addExercise = async (ex: Exercise) => {
+    setPickModal(false)
+    const history = await workoutsApi.exerciseHistory(ex.id, 3).catch(() => [])
+    const lastSession = history[0]
+    const prevWeight = lastSession?.sets?.find((s: any) => !s.is_warmup)?.weight_kg?.toString() ?? '0'
+    const prevReps = lastSession?.sets?.find((s: any) => !s.is_warmup)?.reps?.toString() ?? '8'
+    const prevBestStr = lastSession ? `${prevWeight}kg × ${prevReps}` : ''
+
+    const newBlock: ExerciseBlock = {
+      exercise_id: ex.id,
+      exercise_name: ex.name,
+      muscle_group: ex.muscle_group,
+      sets: [{ weight: prevWeight, reps: prevReps, saved: false, is_warmup: false, saving: false, set_number: 1 }],
+      prevBest: prevBestStr,
+      recentHistory: history,
+      collapsed: false,
+    }
+    setBlocks(prev => [...prev, newBlock])
+  }
+
+  // ── Populate from today's plan ──
+  const populateFromPlan = async (plan: TodayPlan) => {
+    const newBlocks: ExerciseBlock[] = await Promise.all(
+      plan.exercises.map(async (ex) => {
+        const history = await workoutsApi.exerciseHistory(ex.exercise_id, 3).catch(() => [])
+        const prevWeight = ex.previous_best?.weight_kg?.toString() ?? '0'
+        const prevReps = ex.previous_best
+          ? Math.round((ex.target_reps_min + ex.target_reps_max) / 2).toString()
+          : ex.target_reps_min.toString()
+        const prevBestStr = ex.previous_best
+          ? `${ex.previous_best.weight_kg}kg × ${ex.previous_best.reps}`
+          : ''
+
+        const sets: LiveSet[] = Array.from({ length: ex.target_sets }, (_, i) => ({
+          weight: prevWeight,
+          reps: prevReps,
+          saved: false,
+          is_warmup: false,
+          saving: false,
+          set_number: i + 1,
+        }))
+
+        return {
+          exercise_id: ex.exercise_id,
+          exercise_name: ex.exercise_name,
+          muscle_group: ex.muscle_group,
+          sets,
+          prevBest: prevBestStr,
+          recentHistory: history,
+          collapsed: false,
+        }
+      })
+    )
+    setBlocks(newBlocks)
+  }
+
+  // ── Begin workout ──
+  const beginWorkout = async (fromPlan: TodayPlan | null, blank: boolean) => {
+    if (creatingRef.current) return
+    creatingRef.current = true
+    setShowStartModal(false)
+    try {
+      const label = fromPlan ? fromPlan.split_day_label : 'Workout'
+      const w = await workoutsApi.create({
+        label,
+        date: new Date().toISOString().slice(0, 10),
+        split_day_id: fromPlan ? fromPlan.split_day_id : undefined,
+      })
+      setWorkout(w)
+      setWorkoutLabel(label)
+      storeSetWorkout(w)
+      const now = Date.now()
+      setStartTime(now)
+      setPhase('active')
+
+      if (fromPlan && !blank) {
+        await populateFromPlan(fromPlan)
+      }
+      toast.success(fromPlan ? `Starting ${fromPlan.split_day_label}` : 'Workout started!')
+    } catch {
+      toast.error('Could not start workout')
+    } finally {
+      creatingRef.current = false
+    }
+  }
+
+  // ── Finish workout ──
+  const finishWorkout = async () => {
+    if (!workout || finishingRef.current) return
+    finishingRef.current = true
+    const durationSeconds = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0
+    try {
+      await workoutsApi.update(workout.id, {
+        duration_min: Math.round(durationSeconds / 60),
+      })
+    } catch {
+      toast.error('Could not save workout summary')
+    }
+    setDurationOnFinish(durationSeconds)
+    setPhase('finishing')
+    finishingRef.current = false
+
+    setTomorrowLoading(true)
+    workoutsApi.todayPlan().then(plan => {
+      setTomorrowPlan(plan)
+      setTomorrowLoading(false)
+    }).catch(() => setTomorrowLoading(false))
+  }
+
+  // ── Done (close post-workout modal) ──
+  const handleDone = () => {
+    clearActive()
+    setWorkout(null)
+    setBlocks([])
+    setPhase('idle')
+    setTomorrowPlan(null)
+    setPrs([])
+    setElapsed(0)
+    setStartTime(null)
+    queryClient.invalidateQueries({ queryKey: ['workouts'] })
+    queryClient.invalidateQueries({ queryKey: ['today-plan'] })
+    navigate('/')
+  }
+
+  // ── Voice logger helpers ──
+  const handleVoiceParsed = (parsed: ParsedSet) => {
+    if (!workout) return
+    setBlocks(prev => {
+      const next = [...prev]
+      let targetIdx = next.length - 1
+      if (parsed.exercise_name) {
+        const nameMatch = parsed.exercise_name.toLowerCase()
+        const found = next.findIndex(bl => bl.exercise_name.toLowerCase().includes(nameMatch))
+        if (found !== -1) targetIdx = found
+      }
+      if (targetIdx < 0 || !next[targetIdx]) return prev
+      const block = { ...next[targetIdx] }
+      const sets = [...block.sets]
+      const setIdx = sets.findIndex(s => !s.saved)
+      const idx = setIdx !== -1 ? setIdx : sets.length - 1
+      if (idx < 0) return prev
+      sets[idx] = {
+        ...sets[idx],
+        ...(parsed.weight_kg !== undefined ? { weight: String(parsed.weight_kg) } : {}),
+        ...(parsed.reps !== undefined ? { reps: String(parsed.reps) } : {}),
+        saved: false,
+      }
+      block.sets = sets
+      block.collapsed = false
+      next[targetIdx] = block
+      return next
+    })
+  }
+
+  // ── Cardio helpers ──
   const setCardio = (field: keyof CardioForm, value: string) =>
     setCardioForm(f => ({ ...f, [field]: value }))
 
@@ -295,285 +669,7 @@ export function WorkoutPage() {
     } catch { toast.error('Failed to remove') }
   }
 
-  // Auto-detect next split day from workout history, then begin
-  const startWorkout = async () => {
-    if (activeSplit) {
-      const sortedDays = [...activeSplit.days].sort((a, b) => a.day_number - b.day_number)
-      const nextIdx = detectNextSplitDay(recentWorkouts, activeSplit)
-      const dayLabel = sortedDays[nextIdx]?.label || `Day ${nextIdx + 1}`
-      toast.success(`Starting ${activeSplit.name} — ${dayLabel}`)
-      await beginWorkout(nextIdx)
-    } else {
-      await beginWorkout(null)
-    }
-  }
-
-  const beginWorkout = async (splitDayIdx: number | null) => {
-    // FIX: BUG 5 — idempotency guard: prevent double workout creation from rapid taps
-    if (creatingWorkoutRef.current) return
-    creatingWorkoutRef.current = true
-    setLoading(true)
-    try {
-      const sortedDays = activeSplit ? [...activeSplit.days].sort((a, b) => a.day_number - b.day_number) : []
-      const dayLabel = splitDayIdx !== null && activeSplit
-        ? `${sortedDays[splitDayIdx]?.label} — ${new Date().toLocaleDateString()}`
-        : `Workout — ${new Date().toLocaleDateString()}`
-      const w = await workoutsApi.create({ label: dayLabel })
-      setWorkout(w)
-      // FIX: BUG 5 — persist workout to Zustand so navigation away doesn't lose active session
-      storeSetWorkout(w)
-      setTimerRunning(true)
-
-      // Auto-populate exercises from the chosen split day
-      if (splitDayIdx !== null && activeSplit) {
-        const splitDay = sortedDays[splitDayIdx]
-        if (splitDay?.exercises?.length) {
-          const newBlocks: ExerciseBlock[] = splitDay.exercises
-            .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
-            .map(sde => {
-              const ex = exercises.find(e => e.id === sde.exercise_id)
-              if (!ex) return null
-              const setCount = sde.target_sets || 3
-              const targetReps = sde.target_reps_min || 8
-              return {
-                exercise: ex,
-                expanded: true,
-                sets: Array.from({ length: setCount }, (_, i) => ({
-                  exercise_id: ex.id,
-                  exercise_name: ex.name,
-                  set_number: i + 1,
-                  reps: targetReps,
-                  weight_kg: 0,
-                  is_warmup: false,
-                  saved: false,
-                })),
-                prevBest: null,
-              }
-            })
-            .filter(Boolean) as ExerciseBlock[]
-          setBlocks(newBlocks)
-          // Fetch prev bests in background
-          newBlocks.forEach((block, bi) => {
-            workoutsApi.exerciseHistory(block.exercise.id, 1).then(hist => {
-              if (hist[0]?.sets?.length) {
-                const best = hist[0].sets.reduce((a: any, b: any) => b.weight_kg > a.weight_kg ? b : a, hist[0].sets[0])
-                setBlocks(prev => prev.map((bl, i) => i === bi ? { ...bl, prevBest: best } : bl))
-              }
-            }).catch(() => {})
-          })
-        }
-      }
-    } catch {
-      toast.error('Failed to start workout')
-    } finally {
-      setLoading(false)
-      // FIX: BUG 5 — reset guard after attempt (success or failure)
-      creatingWorkoutRef.current = false
-    }
-  }
-
-  const addExercise = (ex: Exercise) => {
-    setBlocks(b => [...b, {
-      exercise: ex, expanded: true,
-      sets: [{ exercise_id: ex.id, exercise_name: ex.name, set_number: 1, reps: 8, weight_kg: 0, is_warmup: false, saved: false }],
-      prevBest: null,
-    }])
-    setPickModal(false)
-    workoutsApi.exerciseHistory(ex.id, 3).then(hist => {
-      if (!hist.length) return
-      const prevBest = hist[0]?.sets?.length
-        ? hist[0].sets.reduce((a: any, b: any) => b.weight_kg > a.weight_kg ? b : a, hist[0].sets[0])
-        : null
-      const recentHistory = hist.slice(0, 3).map((session: any) => ({
-        date: session.date,
-        sets: (session.sets || []).map((s: any) => ({
-          weight_kg: s.weight_kg,
-          reps: s.reps,
-          is_warmup: s.is_warmup,
-        })),
-      }))
-      setBlocks(bls => bls.map(bl => bl.exercise.id === ex.id
-        ? { ...bl, prevBest: prevBest ?? bl.prevBest, recentHistory }
-        : bl
-      ))
-    }).catch(() => {})
-  }
-
-  const updateSet = (blockIdx: number, setIdx: number, field: keyof LiveSet, value: any) => {
-    setBlocks(b => {
-      const next = [...b]
-      next[blockIdx] = { ...next[blockIdx], sets: [...next[blockIdx].sets] }
-      next[blockIdx].sets[setIdx] = { ...next[blockIdx].sets[setIdx], [field]: value, saved: false }
-      return next
-    })
-  }
-
-  const addSet = (blockIdx: number) => {
-    setBlocks(b => {
-      const next = [...b]
-      const block = next[blockIdx]
-      const last = block.sets[block.sets.length - 1]
-      next[blockIdx] = {
-        ...block,
-        sets: [...block.sets, {
-          exercise_id: block.exercise.id,
-          exercise_name: block.exercise.name,
-          set_number: block.sets.length + 1,
-          reps: last?.reps || 8,
-          weight_kg: last?.weight_kg || 0,
-          is_warmup: false,
-          saved: false,
-        }],
-      }
-      return next
-    })
-  }
-
-  const removeSet = (blockIdx: number, setIdx: number) => {
-    setBlocks(b => {
-      const next = [...b]
-      const sets = next[blockIdx].sets.filter((_, i) => i !== setIdx).map((s, i) => ({ ...s, set_number: i + 1 }))
-      if (sets.length === 0) return next.filter((_, i) => i !== blockIdx)
-      next[blockIdx] = { ...next[blockIdx], sets }
-      return next
-    })
-  }
-
-  const saveSet = async (blockIdx: number, setIdx: number) => {
-    if (!workout) return
-    const s = blocks[blockIdx].sets[setIdx]
-    const block = blocks[blockIdx]
-    // FIX: BUG 3 — prevent duplicate submissions: bail if this set is already being saved
-    if (s.saving) return
-
-    // FIX: BUG 3 — mark set as saving immediately to disable button
-    setBlocks(b => {
-      const next = [...b]
-      next[blockIdx] = { ...next[blockIdx], sets: [...next[blockIdx].sets] }
-      next[blockIdx].sets[setIdx] = { ...next[blockIdx].sets[setIdx], saving: true }
-      return next
-    })
-
-    try {
-      let savedId: string
-
-      // FIX: BUG 2 — if the set already has a server id, call PUT (update) not POST (add)
-      if (s.id) {
-        await workoutsApi.updateSet(workout.id, s.id, {
-          reps: s.reps,
-          weight_kg: s.weight_kg,
-          rpe: s.rpe ?? undefined,
-          is_warmup: s.is_warmup,
-          notes: s.notes,
-        } as any)
-        savedId = s.id
-      } else {
-        const saved = await workoutsApi.addSet(workout.id, {
-          exercise_id: s.exercise_id,
-          set_number: s.set_number,
-          reps: s.reps,
-          weight_kg: s.weight_kg,
-          rpe: s.rpe ?? undefined,
-          is_warmup: s.is_warmup,
-          notes: s.notes,
-        })
-        savedId = saved.id
-      }
-
-      setBlocks(b => {
-        const next = [...b]
-        next[blockIdx] = { ...next[blockIdx], sets: [...next[blockIdx].sets] }
-        next[blockIdx].sets[setIdx] = { ...next[blockIdx].sets[setIdx], id: savedId, saved: true, saving: false }
-        return next
-      })
-      // Start rest timer after saving a working set
-      if (!s.is_warmup) setRestSeconds(restDuration)
-      // Check for PR (non-warmup sets only)
-      if (!s.is_warmup && s.weight_kg > 0) {
-        try {
-          const records = await api.get(`/records/${s.exercise_id}`).then(r => r.data) as any[]
-          const weightPr = records.find(r => r.pr_type === 'weight')
-          if (!weightPr || s.weight_kg > weightPr.weight_kg) {
-            setPrCelebration({ show: true, weight: s.weight_kg, reps: s.reps, exerciseName: block.exercise.name })
-          }
-        } catch { /* PR check is non-critical */ }
-      }
-    } catch {
-      // FIX: BUG 2/3 — on failure, revert saving flag and show error
-      setBlocks(b => {
-        const next = [...b]
-        next[blockIdx] = { ...next[blockIdx], sets: [...next[blockIdx].sets] }
-        next[blockIdx].sets[setIdx] = { ...next[blockIdx].sets[setIdx], saving: false }
-        return next
-      })
-      toast.error('Failed to save set')
-    }
-  }
-
-  const finishWorkout = async () => {
-    if (!workout) return
-    // FIX: BUG 5 — disable "Complete" button after first tap to prevent double finish
-    if (finishingRef.current) return
-    finishingRef.current = true
-    stopRest()
-    setTimerRunning(false)
-    try {
-      await workoutsApi.update(workout.id, { duration_min: Math.floor(timer / 60), notes: sessionNotes || undefined })
-      toast.success(`Workout done! ${formatTime(timer)} ⚡`)
-    } catch {
-      toast.error('Failed to save workout — data may be incomplete')
-    } finally {
-      finishingRef.current = false
-    }
-    // FIX: BUG 5 — clear persisted workout from Zustand on finish
-    clearActive()
-    setWorkout(null)
-    setBlocks([])
-    setTimer(0)
-    setSessionNotes('')
-  }
-
-  // Handle voice-parsed set: pre-fill the matching exercise block's last set
-  const handleVoiceParsed = (parsed: ParsedSet) => {
-    if (!workout) return
-    setBlocks(prev => {
-      const next = [...prev]
-      // Find matching block by exercise name if provided
-      let targetIdx = next.length - 1 // default: last block
-      if (parsed.exercise_name) {
-        const nameMatch = parsed.exercise_name.toLowerCase()
-        const found = next.findIndex(bl => bl.exercise.name.toLowerCase().includes(nameMatch))
-        if (found !== -1) targetIdx = found
-      }
-      if (targetIdx < 0 || !next[targetIdx]) return prev
-      const block = { ...next[targetIdx] }
-      const sets = [...block.sets]
-      // Find first unsaved set to pre-fill, or the last set
-      const setIdx = sets.findIndex(s => !s.saved)
-      const idx = setIdx !== -1 ? setIdx : sets.length - 1
-      if (idx < 0) return prev
-      sets[idx] = {
-        ...sets[idx],
-        ...(parsed.weight_kg !== undefined ? { weight_kg: parsed.weight_kg } : {}),
-        ...(parsed.reps !== undefined ? { reps: parsed.reps } : {}),
-        ...(parsed.rpe !== undefined ? { rpe: parsed.rpe } : {}),
-        saved: false,
-      }
-      block.sets = sets
-      block.expanded = true
-      next[targetIdx] = block
-      return next
-    })
-  }
-
-  // Derive context values for VoiceLogger
-  const currentBlock = blocks.length > 0 ? blocks[blocks.findIndex(b => b.sets.some(s => !s.saved)) ?? blocks.length - 1] : null
-  const currentExercise = currentBlock?.exercise ?? null
-  const currentUnsavedSet = currentBlock?.sets.find(s => !s.saved) ?? null
-  const lastWeight = currentUnsavedSet?.weight_kg ?? currentBlock?.prevBest?.weight_kg ?? 0
-  const lastReps = currentUnsavedSet?.reps ?? currentBlock?.prevBest?.reps ?? 0
-
-  // Group exercises for picker
+  // ── Exercise picker ──
   const muscleGroups = ['All', ...Array.from(new Set(exercises.map(e => e.muscle_group))).sort()]
   const filteredExercises = exercises
     .filter(e => muscleFilter === 'All' || e.muscle_group === muscleFilter)
@@ -584,48 +680,62 @@ export function WorkoutPage() {
     return acc
   }, {} as Record<string, Exercise[]>)
 
+  // Current block for voice context
+  const currentBlockIdx = blocks.findIndex(b => b.sets.some(s => !s.saved))
+  const currentBlock = currentBlockIdx !== -1 ? blocks[currentBlockIdx] : blocks[blocks.length - 1] ?? null
+  const currentUnsavedSet = currentBlock?.sets.find(s => !s.saved) ?? null
+  const lastWeight = parseFloat(currentUnsavedSet?.weight ?? currentBlock?.prevBest?.split('kg')[0] ?? '0') || 0
+  const lastReps = parseInt(currentUnsavedSet?.reps ?? '0') || 0
+
+  const cardioLabel = CARDIO_TYPES.find(c => c.value === cardioForm.cardio_type)
   const currentType = cardioForm.cardio_type
   const showLevel = USE_LEVEL.includes(currentType)
   const showSpeed = USE_SPEED.includes(currentType)
   const showRpm   = USE_RPM.includes(currentType)
-  const cardioLabel = CARDIO_TYPES.find(c => c.value === cardioForm.cardio_type)
 
-  // Rest timer progress (0→1)
-  const restProgress = restSeconds !== null ? restSeconds / restDuration : 0
-  const restCircumference = 2 * Math.PI * 22
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="page px-4">
-      {/* PR Celebration overlay */}
+      {/* PR Celebration */}
+      <PrCelebration
+        show={prShow}
+        weight={prData.weight}
+        reps={prData.reps}
+        exerciseName={prData.exerciseName}
+        onClose={() => setPrShow(false)}
+      />
+
+      {/* Post-workout modal */}
+      <PostWorkoutModal
+        open={phase === 'finishing'}
+        durationSeconds={durationOnFinish}
+        totalSets={totalSets}
+        totalVolume={totalVolume}
+        prs={prs}
+        tomorrowPlan={tomorrowPlan}
+        tomorrowLoading={tomorrowLoading}
+        onDone={handleDone}
+      />
+
+      {/* Start modal */}
+      <WorkoutStartModal
+        open={showStartModal}
+        todayPlan={todayPlan}
+        onStartFromSplit={() => beginWorkout(todayPlan ?? null, false)}
+        onStartBlank={() => beginWorkout(null, true)}
+        onClose={() => setShowStartModal(false)}
+      />
+
+      {/* Rest timer */}
       <AnimatePresence>
-        {prCelebration.show && (
-          <>
-            <style>{`@keyframes confettiFall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}`}</style>
-            <div className="fixed inset-0 pointer-events-none z-[60] overflow-hidden">
-              {Array.from({ length: 40 }, (_, i) => (
-                <div key={i} className="absolute rounded-sm" style={{
-                  left: `${(i * 7.3) % 100}%`, top: '-10px',
-                  width: 6 + (i % 5) * 2, height: 6 + (i % 5) * 2,
-                  background: ['#dc2626','#1d4ed8','#7c3aed','#f59e0b','#10b981'][i % 5],
-                  animation: `confettiFall ${1.5 + (i * 0.07) % 1}s ${(i * 0.05) % 0.5}s ease-in forwards`,
-                }} />
-              ))}
-            </div>
-            <motion.div initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5 }}
-              className="fixed inset-0 z-[61] flex items-center justify-center pointer-events-none">
-              <div className="bg-bg-card/95 backdrop-blur-xl border-2 border-primary-700/50 rounded-3xl p-8 text-center shadow-2xl max-w-xs mx-4 pointer-events-auto"
-                onClick={() => setPrCelebration(p => ({ ...p, show: false }))}>
-                <div className="text-5xl mb-3">🏆</div>
-                <h2 className="text-2xl font-bold text-gradient mb-1">New PR!</h2>
-                <p className="text-text-muted text-sm mb-3">{prCelebration.exerciseName}</p>
-                <p className="text-3xl font-bold text-text-primary">{prCelebration.weight}kg × {prCelebration.reps}</p>
-                <p className="text-xs text-text-muted mt-3">Tap to dismiss</p>
-              </div>
-            </motion.div>
-          </>
+        {showRestTimer && (
+          <RestTimer
+            onClose={() => setShowRestTimer(false)}
+            onComplete={() => setShowRestTimer(false)}
+          />
         )}
       </AnimatePresence>
-      <PageHeader title="Workout" subtitle="Log your training session" />
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-bg-tertiary rounded-2xl mb-4">
@@ -647,249 +757,116 @@ export function WorkoutPage() {
         {/* ── LIFT TAB ── */}
         {tab === 'lift' && (
           <motion.div key="lift" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            {!workout ? (
-              <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-6 gap-6">
-                <motion.div animate={{ y: [0, -8, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}>
-                  <div className="w-24 h-24 rounded-3xl bg-primary-700/20 flex items-center justify-center">
-                    <Dumbbell className="w-12 h-12 text-primary-400" />
-                  </div>
-                </motion.div>
-                <div>
-                  <h2 className="text-xl font-bold text-text-primary mb-1">Ready to train?</h2>
-                  {activeSplit && (
-                    <p className="text-text-muted text-sm">
-                      Active split: <span className="text-primary-400 font-medium">{activeSplit.name}</span>
-                    </p>
-                  )}
-                </div>
-                <Button size="lg" loading={loading} onClick={startWorkout} className="w-full max-w-xs">
-                  <Plus className="w-5 h-5" /> Start Workout
-                </Button>
-              </div>
-            ) : (
+            {phase === 'idle' && (
               <>
-                {/* Session notes */}
-                <textarea
-                  value={sessionNotes}
-                  onChange={e => setSessionNotes(e.target.value)}
-                  onBlur={() => workout && workoutsApi.update(workout.id, { notes: sessionNotes || undefined }).catch(() => {})}
-                  placeholder="Session notes (optional)…"
-                  rows={2}
-                  className="w-full bg-bg-tertiary border border-border rounded-xl px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:ring-1 focus:ring-primary-700/50 mb-4"
+                <PageHeader
+                  title="Workout"
+                  subtitle={todayPlan ? todayPlan.split_day_label : 'Track your training'}
                 />
-                {/* Header with timer + rest duration picker */}
-                <div className="flex items-center justify-between pb-4 flex-wrap gap-2">
-                  <div>
-                    <h2 className="text-base font-bold text-text-primary">{workout.label}</h2>
-                    <p className="text-text-muted text-xs">{blocks.reduce((a, b) => a + b.sets.filter(s => s.saved).length, 0)} sets logged</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {/* Rest duration picker */}
-                    <div className="flex items-center gap-1 p-1 bg-bg-tertiary rounded-xl">
-                      <Bell className="w-3 h-3 text-text-muted ml-1" />
-                      {REST_PRESETS.map(sec => (
-                        <button
-                          key={sec}
-                          onClick={() => setRestDuration(sec)}
-                          className={`px-2 py-1 rounded-lg text-xs font-medium transition-all ${restDuration === sec ? 'bg-primary-700 text-white' : 'text-text-muted hover:text-text-secondary'}`}
-                        >
-                          {sec}s
-                        </button>
+
+                {/* Today's plan preview */}
+                {todayPlan && (
+                  <div className="bg-bg-card border border-border rounded-2xl p-4 mb-4">
+                    <p className="text-xs text-text-muted uppercase tracking-wide mb-2">
+                      Today's Plan — {todayPlan.split_name}
+                    </p>
+                    <p className="font-bold text-text-primary mb-1">{todayPlan.split_day_label}</p>
+                    <div className="space-y-1">
+                      {todayPlan.exercises.slice(0, 5).map(ex => (
+                        <div key={ex.exercise_id} className="flex items-center justify-between">
+                          <span className="text-sm text-text-secondary">{ex.exercise_name}</span>
+                          <span className="text-xs text-text-muted">{ex.target_sets}×{ex.target_reps_min}–{ex.target_reps_max}</span>
+                        </div>
                       ))}
+                      {todayPlan.exercises.length > 5 && (
+                        <p className="text-xs text-text-muted">+{todayPlan.exercises.length - 5} more</p>
+                      )}
                     </div>
-                    {/* Workout timer */}
-                    <motion.button
-                      onClick={() => setTimerRunning(r => !r)}
-                      animate={timerRunning ? { boxShadow: ['0 0 0px rgba(220,38,38,0)', '0 0 12px rgba(220,38,38,0.4)', '0 0 0px rgba(220,38,38,0)'] } : {}}
-                      transition={{ duration: 1.5, repeat: timerRunning ? Infinity : 0 }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-bg-tertiary border border-border text-sm font-mono"
-                    >
-                      <Timer className={`w-3.5 h-3.5 ${timerRunning ? 'text-primary-400' : 'text-text-muted'}`} />
-                      <span className={timerRunning ? 'text-text-primary' : 'text-text-muted'}>{formatTime(timer)}</span>
-                    </motion.button>
-                    <Button variant="danger" size="sm" onClick={finishWorkout}>Done</Button>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setShowStartModal(true)}
+                  className="w-full py-4 bg-primary-700 text-white rounded-2xl font-bold text-lg flex items-center justify-center gap-2"
+                >
+                  <Dumbbell className="w-6 h-6" />
+                  Start Workout
+                </button>
+              </>
+            )}
+
+            {phase === 'active' && (
+              <>
+                {/* Sticky header */}
+                <div className="sticky top-0 z-20 bg-bg-primary/95 backdrop-blur-sm -mx-4 px-4 pt-safe pb-3 border-b border-border mb-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-primary-700 animate-pulse" />
+                      <span className="text-lg font-mono font-bold text-text-primary">{formatElapsed(elapsed)}</span>
+                    </div>
+                    <span className="text-sm font-semibold text-text-primary truncate max-w-[120px]">{workoutLabel}</span>
+                    <span className="text-sm text-text-muted">{formatWeight(totalVolume, useKg)}</span>
                   </div>
                 </div>
-
-                {/* REST TIMER WIDGET */}
-                <AnimatePresence>
-                  {restSeconds !== null && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -10, scale: 0.97 }}
-                      className="mb-4 p-4 rounded-2xl bg-bg-card border border-primary-700/30 flex items-center gap-4"
-                    >
-                      {/* Countdown ring */}
-                      <div className="relative flex-shrink-0 w-14 h-14">
-                        <svg className="w-14 h-14 -rotate-90" viewBox="0 0 48 48">
-                          <circle cx="24" cy="24" r="22" fill="none" stroke="rgba(220,38,38,0.15)" strokeWidth="3" />
-                          <circle
-                            cx="24" cy="24" r="22" fill="none"
-                            stroke="#dc2626" strokeWidth="3"
-                            strokeDasharray={restCircumference}
-                            strokeDashoffset={restCircumference * (1 - restProgress)}
-                            strokeLinecap="round"
-                            style={{ transition: 'stroke-dashoffset 1s linear' }}
-                          />
-                        </svg>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <span className="text-sm font-bold font-mono text-text-primary">{formatTime(restSeconds)}</span>
-                        </div>
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-semibold text-text-primary text-sm">Rest time</p>
-                        <p className="text-xs text-text-muted">Get ready for your next set</p>
-                      </div>
-                      <button
-                        onClick={stopRest}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-bg-tertiary text-text-muted hover:text-text-primary text-xs font-medium transition-colors"
-                      >
-                        <SkipForward className="w-3.5 h-3.5" /> Skip
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
 
                 {/* Exercise blocks */}
                 <div className="space-y-3">
                   <AnimatePresence>
                     {blocks.map((block, blockIdx) => (
                       <motion.div
-                        key={block.exercise.id + blockIdx}
+                        key={block.exercise_id + blockIdx}
                         initial={{ opacity: 0, y: 12 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                       >
-                        <Card padding="none">
+                        <div className="bg-bg-card border border-border rounded-2xl mb-3 overflow-hidden">
+                          {/* Exercise header */}
                           <button
-                            onClick={() => setBlocks(b => b.map((bl, i) => i === blockIdx ? { ...bl, expanded: !bl.expanded } : bl))}
+                            onClick={() => toggleCollapse(blockIdx)}
                             className="w-full flex items-center justify-between p-4"
                           >
-                            <div className="text-left">
-                              <div className="font-semibold text-text-primary">{block.exercise.name}</div>
+                            <div className="flex-1 text-left">
+                              <p className="font-bold text-text-primary">{block.exercise_name}</p>
                               {block.prevBest && (
-                                <div className="text-xs text-text-muted mt-0.5">
-                                  Prev best: {formatWeight(block.prevBest.weight_kg, useKg)} × {block.prevBest.reps}
-                                </div>
+                                <p className="text-xs text-text-muted mt-0.5">Previous: {block.prevBest}</p>
                               )}
                             </div>
-                            {block.expanded ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
+                            <ChevronDown className={`w-5 h-5 text-text-muted transition-transform ${block.collapsed ? '' : 'rotate-180'}`} />
                           </button>
 
-                          {block.expanded && (
-                            <div className="px-4 pb-4 space-y-2">
-                              <div className="grid grid-cols-[1fr_2fr_2fr_auto_auto] gap-2 text-xs text-text-muted px-1 mb-1">
-                                <span>Set</span><span>Weight (kg)</span><span>Reps</span><span></span><span></span>
+                          {!block.collapsed && (
+                            <div className="px-4 pb-4">
+                              {/* Column headers */}
+                              <div className="grid grid-cols-[28px_1fr_1fr_36px] gap-2 mb-2 text-[11px] text-text-muted uppercase tracking-wide px-1">
+                                <span>Set</span>
+                                <span className="text-center">kg</span>
+                                <span className="text-center">Reps</span>
+                                <span />
                               </div>
 
                               {block.sets.map((set, setIdx) => (
-                                <div key={setIdx}>
-                                <motion.div
-                                  layout
-                                  animate={set.saved ? { backgroundColor: 'rgba(34,197,94,0.04)' } : { backgroundColor: 'rgba(20,20,40,1)' }}
-                                  className={`grid grid-cols-[1fr_2fr_2fr_auto_auto] gap-2 items-center p-2 rounded-xl border transition-colors ${set.saved ? 'border-accent-green/15' : 'border-transparent bg-bg-tertiary'}`}
-                                >
-                                  <button
-                                    onClick={() => updateSet(blockIdx, setIdx, 'is_warmup', !set.is_warmup)}
-                                    className={`text-xs font-bold text-center w-7 h-7 rounded-lg flex items-center justify-center mx-auto transition-colors ${set.is_warmup ? 'bg-accent-yellow/15 text-accent-yellow' : 'text-text-secondary hover:bg-bg-hover'}`}
-                                  >
-                                    {set.is_warmup ? 'W' : set.set_number}
-                                  </button>
-
-                                  <div className="flex items-center gap-1">
-                                    <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'weight_kg', Math.max(0, set.weight_kg - weightStep(useKg)))}>
-                                      <Minus className="w-3 h-3" />
-                                    </button>
-                                    <input
-                                      type="number"
-                                      inputMode="decimal"
-                                      min="0"
-                                      value={set.weight_kg}
-                                      onChange={e => updateSet(blockIdx, setIdx, 'weight_kg', parseFloat(e.target.value) || 0)}
-                                      onFocus={e => e.target.select()}
-                                      className="w-14 bg-bg-secondary border border-border rounded-lg text-center text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-700/50 py-1"
-                                    />
-                                    <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'weight_kg', set.weight_kg + weightStep(useKg))}>
-                                      <Plus className="w-3 h-3" />
-                                    </button>
-                                  </div>
-
-                                  <div className="flex items-center gap-1">
-                                    <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'reps', Math.max(1, set.reps - 1))}>
-                                      <Minus className="w-3 h-3" />
-                                    </button>
-                                    <input
-                                      type="number"
-                                      inputMode="numeric"
-                                      min="1"
-                                      value={set.reps}
-                                      onChange={e => updateSet(blockIdx, setIdx, 'reps', parseInt(e.target.value) || 1)}
-                                      onFocus={e => e.target.select()}
-                                      className="w-12 bg-bg-secondary border border-border rounded-lg text-center text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-700/50 py-1"
-                                    />
-                                    <button className="stepper-btn w-8 h-8 text-xs" onClick={() => updateSet(blockIdx, setIdx, 'reps', set.reps + 1)}>
-                                      <Plus className="w-3 h-3" />
-                                    </button>
-                                  </div>
-
-                                  {/* FIX: BUG 3 — button disabled while API call is in flight */}
-                                  <button
-                                    onClick={() => saveSet(blockIdx, setIdx)}
-                                    disabled={!!set.saving}
-                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${set.saving ? 'bg-bg-tertiary text-text-disabled cursor-not-allowed' : set.saved ? 'bg-accent-green/20 text-accent-green' : 'bg-bg-hover text-text-muted hover:text-text-primary'}`}
-                                  >
-                                    <Check className="w-4 h-4" />
-                                  </button>
-
-                                  <div className="flex gap-1">
-                                    <button
-                                      onClick={() => updateSet(blockIdx, setIdx, 'showNotes', !set.showNotes)}
-                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary transition-colors"
-                                    >
-                                      <MessageSquare className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      onClick={() => removeSet(blockIdx, setIdx)}
-                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-accent-red transition-colors"
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                </motion.div>
-                                {/* RPE selector (per-set) */}
-                                {showRpe && (
-                                  <div className="flex items-center gap-1 flex-wrap pl-2 pb-1">
-                                    <span className="text-[10px] text-text-muted mr-1">RPE:</span>
-                                    {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
-                                      <button key={n}
-                                        onClick={() => updateSet(blockIdx, setIdx, 'rpe', set.rpe === n ? null : n)}
-                                        className={`w-6 h-6 rounded text-[10px] font-semibold transition-all ${set.rpe === n ? (n <= 4 ? 'bg-emerald-600 text-white' : n <= 7 ? 'bg-amber-500 text-white' : 'bg-red-600 text-white') : 'bg-bg-tertiary text-text-muted hover:bg-bg-hover'}`}>
-                                        {n}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                                {/* Per-set notes */}
-                                {set.showNotes && (
-                                  <input
-                                    type="text"
-                                    value={set.notes ?? ''}
-                                    onChange={e => updateSet(blockIdx, setIdx, 'notes', e.target.value)}
-                                    placeholder="Set notes…"
-                                    className="mx-2 mb-2 w-full bg-bg-secondary border border-border rounded-lg px-2 py-1 text-xs text-text-primary placeholder:text-text-muted focus:outline-none"
-                                  />
-                                )}
-                                </div>
+                                <SetRow
+                                  key={setIdx}
+                                  set={set}
+                                  setIdx={setIdx}
+                                  blockIdx={blockIdx}
+                                  onWeightChange={val => updateSet(blockIdx, setIdx, { weight: val, saved: false })}
+                                  onRepsChange={val => updateSet(blockIdx, setIdx, { reps: val, saved: false })}
+                                  onTick={() => handleTick(blockIdx, setIdx)}
+                                  onRemove={() => removeSet(blockIdx, setIdx)}
+                                  onToggleWarmup={() => updateSet(blockIdx, setIdx, { is_warmup: !set.is_warmup, saved: false })}
+                                  useKg={useKg}
+                                />
                               ))}
 
-                              {block.recentHistory && block.recentHistory.length > 0 && (
+                              {/* Recent history */}
+                              {block.recentHistory.length > 0 && (
                                 <div className="mt-2 pt-2 border-t border-border">
                                   <p className="text-xs text-text-muted mb-1.5">Recent sessions</p>
                                   <div className="space-y-1">
-                                    {block.recentHistory.slice(0, 3).map((session, i) => {
-                                      const workingSets = session.sets.filter(s => !s.is_warmup)
-                                      const best = workingSets.reduce((a, b) => b.weight_kg > a.weight_kg ? b : a, workingSets[0])
+                                    {block.recentHistory.slice(0, 3).map((session: any, i: number) => {
+                                      const workingSets = (session.sets || []).filter((s: any) => !s.is_warmup)
+                                      const best = workingSets.reduce((a: any, b: any) => b.weight_kg > a.weight_kg ? b : a, workingSets[0])
                                       return (
                                         <div key={i} className="flex items-center justify-between text-xs">
                                           <span className="text-text-muted">{new Date(session.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
@@ -901,19 +878,34 @@ export function WorkoutPage() {
                                 </div>
                               )}
 
-                              <Button variant="ghost" size="sm" onClick={() => addSet(blockIdx)} className="w-full mt-1 border border-dashed border-border">
-                                <Plus className="w-3.5 h-3.5" /> Add Set
-                              </Button>
+                              {/* Add Set */}
+                              <button
+                                onClick={() => addSet(blockIdx)}
+                                className="w-full py-2 mt-2 border border-dashed border-border rounded-xl text-sm text-text-muted flex items-center justify-center gap-1.5"
+                              >
+                                <Plus className="w-4 h-4" /> Add Set
+                              </button>
                             </div>
                           )}
-                        </Card>
+                        </div>
                       </motion.div>
                     ))}
                   </AnimatePresence>
 
+                  {/* Add Exercise */}
                   <Button variant="secondary" fullWidth onClick={() => setPickModal(true)} className="border-dashed border-border">
                     <Plus className="w-4 h-4" /> Add Exercise
                   </Button>
+                </div>
+
+                {/* Floating Finish button */}
+                <div className="sticky bottom-24 z-20 mt-6">
+                  <button
+                    onClick={finishWorkout}
+                    className="w-full py-4 bg-red-600 text-white rounded-2xl font-bold text-base shadow-lg"
+                  >
+                    Finish Workout
+                  </button>
                 </div>
               </>
             )}
@@ -972,11 +964,11 @@ export function WorkoutPage() {
 
                 {showRpm && (
                   <div>
-                    <label className="text-xs font-medium text-text-secondary block mb-1">RPM (optional — can use range e.g. "60-80")</label>
+                    <label className="text-xs font-medium text-text-secondary block mb-1">RPM (optional)</label>
                     <input
                       type="text"
                       inputMode="decimal"
-                      placeholder="80  or  60-80"
+                      placeholder='80  or  "60-80"'
                       value={cardioForm.rpm}
                       onChange={e => setCardio('rpm', e.target.value)}
                       className="w-full px-3 py-2 bg-bg-tertiary border border-border rounded-xl text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary-700/50"
@@ -1051,12 +1043,12 @@ export function WorkoutPage() {
         )}
       </AnimatePresence>
 
-      {/* Voice logger — floating button, only shown during an active lift workout */}
-      {workout && tab === 'lift' && (
+      {/* Voice logger */}
+      {workout && tab === 'lift' && phase === 'active' && (
         <VoiceLogger
           onSetParsed={handleVoiceParsed}
           context={{
-            exercise_name: currentExercise?.name,
+            exercise_name: currentBlock?.exercise_name,
             last_weight: lastWeight,
             last_reps: lastReps,
           }}
@@ -1072,7 +1064,6 @@ export function WorkoutPage() {
             onChange={e => setSearch(e.target.value)}
             leftIcon={<Search className="w-4 h-4" />}
           />
-          {/* Muscle group filter */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
             {muscleGroups.map(mg => (
               <button

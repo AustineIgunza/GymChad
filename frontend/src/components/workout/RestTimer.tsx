@@ -44,6 +44,7 @@ export function RestTimer({ onClose, onComplete, initialSeconds }: Props) {
         if (r <= 1) {
           clearInterval(intervalRef.current!)
           playBeep()
+          if ('vibrate' in navigator) navigator.vibrate([200, 100, 200])
           onComplete?.()
           return 0
         }

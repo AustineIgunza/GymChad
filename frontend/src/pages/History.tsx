@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Calendar, ChevronDown, ChevronUp, Dumbbell, BarChart2, Trash2 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -7,6 +7,7 @@ import { workoutsApi } from '../services/workouts'
 import { Card } from '../components/ui/Card'
 import { PageHeader } from '../components/ui/PageHeader'
 import { SkeletonList } from '../components/ui/Skeleton'
+import { CalendarHeatmap, buildHeatmapData } from '../components/ui/CalendarHeatmap'
 import type { Workout } from '../types'
 
 const MUSCLE_COLORS: Record<string, string> = {
@@ -59,6 +60,8 @@ export function HistoryPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('days')
+
+  const heatmapData = useMemo(() => buildHeatmapData(allWorkouts), [allWorkouts])
 
   const { data: pageWorkouts = [], isLoading, isFetching } = useQuery({
     queryKey: ['workouts', page],
@@ -140,6 +143,12 @@ export function HistoryPage() {
             {mode}
           </button>
         ))}
+      </div>
+
+      {/* Activity heatmap */}
+      <div className="bg-bg-card border border-border rounded-2xl p-4 mb-4">
+        <p className="text-sm font-semibold text-text-primary mb-3">Activity</p>
+        <CalendarHeatmap data={heatmapData} weeks={26} />
       </div>
 
       {isLoading && displayWorkouts.length === 0 ? (

@@ -35,6 +35,7 @@ class SplitDayExerciseResponse(BaseModel):
     split_day_id: str
     exercise_id: str
     order: int
+    order_index: int = 0  # alias for frontend TypeScript type compatibility
     target_sets: int | None
     target_reps_min: int | None
     target_reps_max: int | None

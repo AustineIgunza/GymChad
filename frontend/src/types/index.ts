@@ -66,10 +66,38 @@ export interface SplitDayExercise {
   split_day_id: string
   exercise_id: string
   order_index: number
+  order: number
   target_sets: number | null
   target_reps_min: number | null
   target_reps_max: number | null
   exercise?: Exercise
+}
+
+export interface PreviousBest {
+  weight_kg: number
+  reps: number
+  date: string
+}
+
+export interface TodayPlanExercise {
+  exercise_id: string
+  exercise_name: string
+  muscle_group: string
+  order: number
+  target_sets: number
+  target_reps_min: number
+  target_reps_max: number
+  notes: string | null
+  previous_best: PreviousBest | null
+}
+
+export interface TodayPlan {
+  split_id: string
+  split_name: string
+  split_day_id: string
+  split_day_label: string
+  day_number: number
+  exercises: TodayPlanExercise[]
 }
 
 export interface Workout {

@@ -44,8 +44,8 @@
     @apply bg-gradient-to-r from-primary-500 to-blue-400 bg-clip-text text-transparent;
   }
 
-  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
-  .pt-safe { padding-top:    env(safe-area-inset-top,    0px); }
+  .pb-safe { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
 
   .skeleton {
     background: linear-gradient(90deg, #0f0f1c 25%, #1a1a30 50%, #0f0f1c 75%);
@@ -54,7 +54,7 @@
   }
 
   /* Mobile: full width. md+: centered with comfortable max-width */
-  .page { @apply min-h-screen bg-bg-primary pb-24 md:pb-8; }
+  .page { @apply min-h-screen bg-bg-primary pb-24 md:pb-8; overflow-x: hidden; }
   .page-inner { @apply max-w-3xl mx-auto px-4 md:px-8; }
 
   .stepper-btn {

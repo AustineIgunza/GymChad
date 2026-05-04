@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { exercisesApi } from '../services/exercises'
+import { workoutsApi } from '../services/workouts'
 import { useAuthStore } from '../stores/authStore'
 import { Card } from '../components/ui/Card'
 import { Select } from '../components/ui/Select'
@@ -14,6 +15,7 @@ import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { PageHeader } from '../components/ui/PageHeader'
+import { CalendarHeatmap, buildHeatmapData } from '../components/ui/CalendarHeatmap'
 import type { BodyMeasurement } from '../types'
 import { Plus, TrendingDown, TrendingUp, Target, Minus } from 'lucide-react'
 import { MuscleHeatMap } from '../components/analytics/MuscleHeatMap'
@@ -115,6 +117,15 @@ export function AnalyticsPage() {
   const [measureForm, setMeasureForm] = useState(defaultMeasurement)
   const [dateRange, setDateRange] = useState<DateRange>('30d')
   const days = DATE_RANGES.find(r => r.id === dateRange)?.days ?? null
+
+  // All workouts for heatmap
+  const { data: allWorkoutsData = [] } = useQuery({
+    queryKey: ['workouts-all'],
+    queryFn: () => workoutsApi.list({ page: 1, limit: 500 }),
+    staleTime: 1000 * 60 * 10,
+  })
+
+  const heatmapData = useMemo(() => buildHeatmapData(allWorkoutsData), [allWorkoutsData])
 
   // Exercises list
   const { data: exercises = [] } = useQuery({
@@ -246,6 +257,12 @@ export function AnalyticsPage() {
             {r.label}
           </button>
         ))}
+      </div>
+
+      {/* Workout frequency heatmap */}
+      <div className="bg-bg-card border border-border rounded-2xl p-4 mb-4">
+        <p className="text-sm font-semibold text-text-primary mb-3">Workout Frequency</p>
+        <CalendarHeatmap data={heatmapData} />
       </div>
 
       <RecoveryDashboard />

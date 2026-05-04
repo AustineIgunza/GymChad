@@ -12,6 +12,7 @@ from app.models.user import User
 from app.schemas.workout import (
     WorkoutCreate, WorkoutUpdate, WorkoutResponse,
     WorkoutSetCreate, WorkoutSetUpdate, WorkoutSetResponse,
+    TodayPlanResponse, TodayPlanExercise, PreviousBest,
 )
 from app.services.progressive_overload import get_recommendation
 from app.services.pr_detection import check_and_save_pr
@@ -194,6 +195,111 @@ async def get_recommendations(
             })
 
     return recommendations
+
+
+async def get_previous_best(db: AsyncSession, user_id: str, exercise_id: str) -> PreviousBest | None:
+    result = await db.execute(
+        select(WorkoutSet, Workout.date)
+        .join(Workout, WorkoutSet.workout_id == Workout.id)
+        .where(and_(
+            Workout.user_id == user_id,
+            WorkoutSet.exercise_id == exercise_id,
+            WorkoutSet.is_warmup == False,
+        ))
+        .order_by(Workout.date.desc(), WorkoutSet.weight_kg.desc())
+        .limit(5)
+    )
+    rows = result.all()
+    if not rows:
+        return None
+    # Best = highest weight (then reps) across most recent sessions
+    best = max(rows, key=lambda r: (r[0].weight_kg, r[0].reps))
+    return PreviousBest(
+        weight_kg=best[0].weight_kg,
+        reps=best[0].reps,
+        date=str(best[1]),
+    )
+
+
+@router.get("/today-plan")
+async def get_today_plan(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> TodayPlanResponse | None:
+    """
+    Returns today's workout plan from the user's active split.
+    Determines which split day to do next based on most recent split workout.
+    Returns null if no active split is configured.
+    """
+    from app.models.split import Split, SplitDay, SplitDayExercise
+
+    result = await db.execute(
+        select(Split)
+        .where(and_(Split.user_id == current_user.id, Split.is_active == True))
+        .options(
+            selectinload(Split.days)
+            .selectinload(SplitDay.exercises)
+            .selectinload(SplitDayExercise.exercise)
+        )
+    )
+    split = result.scalar_one_or_none()
+    if not split or not split.days:
+        return None
+
+    # Sort days by day_number
+    sorted_days = sorted(split.days, key=lambda d: d.day_number)
+
+    # Find the most recent workout that belongs to this split
+    split_day_ids = {d.id for d in split.days}
+    recent = await db.execute(
+        select(Workout)
+        .where(and_(
+            Workout.user_id == current_user.id,
+            Workout.split_day_id.in_(split_day_ids),
+        ))
+        .order_by(Workout.date.desc())
+        .limit(1)
+    )
+    last_workout = recent.scalar_one_or_none()
+
+    # Determine the next split day (round-robin)
+    if last_workout and last_workout.split_day_id:
+        last_day_ids = [d.id for d in sorted_days]
+        try:
+            last_idx = last_day_ids.index(last_workout.split_day_id)
+            next_idx = (last_idx + 1) % len(sorted_days)
+        except ValueError:
+            next_idx = 0
+    else:
+        next_idx = 0
+    today_day = sorted_days[next_idx]
+
+    # Sort exercises by order field
+    sorted_exercises = sorted(today_day.exercises, key=lambda e: getattr(e, "order", 0))
+
+    exercises = []
+    for sde in sorted_exercises:
+        prev = await get_previous_best(db, current_user.id, sde.exercise_id)
+        exercises.append(TodayPlanExercise(
+            exercise_id=sde.exercise_id,
+            exercise_name=sde.exercise.name if sde.exercise else "Unknown",
+            muscle_group=sde.exercise.muscle_group.value if sde.exercise else "",
+            order=getattr(sde, "order", 0),
+            target_sets=sde.target_sets or 3,
+            target_reps_min=sde.target_reps_min or 8,
+            target_reps_max=sde.target_reps_max or 12,
+            notes=getattr(sde, "notes", None),
+            previous_best=prev,
+        ))
+
+    return TodayPlanResponse(
+        split_id=split.id,
+        split_name=split.name,
+        split_day_id=today_day.id,
+        split_day_label=today_day.label,
+        day_number=today_day.day_number,
+        exercises=exercises,
+    )
 
 
 @router.get("/{workout_id}", response_model=WorkoutResponse)
