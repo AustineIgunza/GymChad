@@ -7,7 +7,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { Select } from '../../components/ui/Select'
-import { useToast } from '../../stores/uiStore'
+import toast from 'react-hot-toast'
 import type { Goal, ActivityLevel, Sex } from '../../types'
 
 const STEPS = ['goal', 'body', 'activity'] as const
@@ -27,7 +27,6 @@ export function Onboarding() {
   })
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-  const toast = useToast()
 
   const stepIdx = STEPS.indexOf(step)
 

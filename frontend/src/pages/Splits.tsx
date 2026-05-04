@@ -4,7 +4,7 @@ import { Plus, CheckCircle2, Trash2, ChevronDown, ChevronUp, Zap, Sparkles, Sear
 import { splitsApi } from '../services/splits'
 import { exercisesApi } from '../services/exercises'
 import api from '../services/api'
-import { useToast } from '../stores/uiStore'
+import toast from 'react-hot-toast'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
@@ -129,7 +129,6 @@ export function SplitsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const toast = useToast()
 
   // Shared form state (create / customize / edit)
   const [name, setName] = useState('')

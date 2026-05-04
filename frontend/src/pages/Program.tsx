@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
-import { useToast } from '../stores/uiStore'
+import toast from 'react-hot-toast'
 import {
   programApi,
   type ActiveProgram,
@@ -408,7 +408,6 @@ function ActiveProgramView({
   onRefresh: () => void
 }) {
   const navigate = useNavigate()
-  const toast = useToast()
   const [skipping, setSkipping] = useState(false)
   const [progressions, setProgressions] = useState<ProgressionInfo[]>([])
 
@@ -646,7 +645,6 @@ function ActiveProgramView({
 const TOTAL_WIZARD_STEPS = 6
 
 export function ProgramPage() {
-  const toast = useToast()
 
   // Mode: null = loading, 'onboarding' = wizard, 'active' = program view
   const [mode, setMode] = useState<null | 'onboarding' | 'active'>(null)

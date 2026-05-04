@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Brain, Zap, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react'
 import api from '../../services/api'
-import { useToast } from '../../stores/uiStore'
+import toast from 'react-hot-toast'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -236,7 +236,6 @@ function IntelligenceSkeleton() {
 // ── Main Component ────────────────────────────────────────────────────────
 
 export function NutritionIntelligence({ context, workoutId }: NutritionIntelligenceProps) {
-  const toast = useToast()
 
   const [loading, setLoading] = useState(true)
   const [preWorkout, setPreWorkout] = useState<PreWorkoutBrief | null>(null)

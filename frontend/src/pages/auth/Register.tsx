@@ -6,7 +6,7 @@ import { supabase } from '../../services/supabase'
 import { useAuthStore } from '../../stores/authStore'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
-import { useToast } from '../../stores/uiStore'
+import toast from 'react-hot-toast'
 
 export function Register() {
   const [name, setName] = useState('')
@@ -15,7 +15,6 @@ export function Register() {
   const [loading, setLoading] = useState(false)
   const { initialize } = useAuthStore()
   const navigate = useNavigate()
-  const toast = useToast()
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -42,7 +41,7 @@ export function Register() {
         }
         navigate('/onboarding')
       } else {
-        toast.info('Check your email to confirm your account')
+        toast('Check your email to confirm your account')
         navigate('/login')
       }
     } catch (err: any) {

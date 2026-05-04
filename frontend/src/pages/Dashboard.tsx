@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Dumbbell, Settings, ChevronRight, Zap, TrendingUp, ChevronDown, Footprints, Flame, Trophy } from 'lucide-react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
 import { workoutsApi } from '../services/workouts'
@@ -40,8 +40,7 @@ function SkeletonCard({ height = 'h-24' }: { height?: string }) {
 export function Dashboard() {
   const { user } = useAuthStore()
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const [recsExpanded, setRecsExpanded] = useState(false)
+const [recsExpanded, setRecsExpanded] = useState(false)
   const [stepsInput, setStepsInput] = useState('')
   const [savingSteps, setSavingSteps] = useState(false)
   const [showStepsInput, setShowStepsInput] = useState(false)

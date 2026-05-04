@@ -5,7 +5,7 @@ import { PageHeader } from '../components/ui/PageHeader'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
-import { useToast } from '../stores/uiStore'
+import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
 import { useBuddySession, type PartnerSet } from '../hooks/useBuddySession'
 import api from '../services/api'
@@ -82,7 +82,6 @@ interface LandingProps {
 }
 
 function LandingView({ onSessionReady }: LandingProps) {
-  const toast = useToast()
   const [hosting, setHosting] = useState(false)
   const [hostedCode, setHostedCode] = useState<string | null>(null)
   const [hostedSessionId, setHostedSessionId] = useState<string | null>(null)
@@ -234,7 +233,6 @@ interface ActiveSessionProps {
 }
 
 function ActiveSessionView({ sessionInfo, userId, onEnd }: ActiveSessionProps) {
-  const toast = useToast()
   const [ending, setEnding] = useState(false)
   const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([])
   // myExercise / myLastSet would be driven by the parent workout in a full integration

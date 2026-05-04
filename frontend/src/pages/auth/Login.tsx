@@ -6,7 +6,7 @@ import { supabase } from '../../services/supabase'
 import { useAuthStore } from '../../stores/authStore'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
-import { useToast } from '../../stores/uiStore'
+import toast from 'react-hot-toast'
 
 export function Login() {
   const [email, setEmail] = useState('')
@@ -16,7 +16,6 @@ export function Login() {
   const [resending, setResending] = useState(false)
   const { initialize } = useAuthStore()
   const navigate = useNavigate()
-  const toast = useToast()
 
   const resendConfirmation = async () => {
     if (!email) { toast.error('Enter your email first'); return }

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mic, MicOff, Check, X, RotateCcw, Loader2 } from 'lucide-react'
 import { useVoiceLogger } from '../../hooks/useVoiceLogger'
-import { useToast } from '../../stores/uiStore'
+import toast from 'react-hot-toast'
 import { Button } from '../ui/Button'
 import api from '../../services/api'
 
@@ -43,7 +43,6 @@ type Phase = 'idle' | 'listening' | 'processing' | 'confirmation'
 
 // ── Component ──────────────────────────────────────────────────────────────────
 export function VoiceLogger({ onSetParsed, context }: VoiceLoggerProps) {
-  const toast = useToast()
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceLogger()
 
   const [phase, setPhase] = useState<Phase>('idle')

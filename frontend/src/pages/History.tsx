@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Calendar, ChevronDown, ChevronUp, Dumbbell, BarChart2, Trash2 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -66,18 +66,15 @@ export function HistoryPage() {
     placeholderData: (prev) => prev,
   })
 
-  // Accumulate pages for the days view
-  const workouts: Workout[] = viewMode === 'days'
-    ? (() => {
-        // Merge pageWorkouts into allWorkouts, deduplicating by id
-        const ids = new Set(allWorkouts.map(w => w.id))
-        const newOnes = (pageWorkouts as Workout[]).filter(w => !ids.has(w.id))
-        if (newOnes.length > 0) {
-          setAllWorkouts(prev => [...prev, ...newOnes])
-        }
-        return allWorkouts.length > 0 ? allWorkouts : (pageWorkouts as Workout[])
-      })()
-    : allWorkouts
+  // Accumulate pages for the days view (merge into allWorkouts, deduplicating by id)
+  useEffect(() => {
+    if (viewMode !== 'days') return
+    const ids = new Set(allWorkouts.map(w => w.id))
+    const newOnes = (pageWorkouts as Workout[]).filter(w => !ids.has(w.id))
+    if (newOnes.length > 0) {
+      setAllWorkouts(prev => [...prev, ...newOnes])
+    }
+  }, [pageWorkouts]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasMore = (pageWorkouts as Workout[]).length === 20
 

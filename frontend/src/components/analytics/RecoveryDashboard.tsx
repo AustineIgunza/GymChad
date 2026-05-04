@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Activity, X } from 'lucide-react'
 import api from '../../services/api'
-import { useToast } from '../../stores/uiStore'
+import toast from 'react-hot-toast'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -234,7 +234,6 @@ function RecoverySkeleton() {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function RecoveryDashboard() {
-  const toast = useToast()
 
   const [recovery, setRecovery] = useState<RecoveryScore | null>(null)
   const [fatigue, setFatigue] = useState<MuscleFatigue | null>(null)

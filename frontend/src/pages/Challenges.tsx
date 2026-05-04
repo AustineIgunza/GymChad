@@ -9,7 +9,7 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { AchievementToast } from '../components/gamification/AchievementToast'
 import { useAuthStore } from '../stores/authStore'
-import { useToast } from '../stores/uiStore'
+import toast from 'react-hot-toast'
 import {
   gamificationApi,
   type StreakData,
@@ -296,7 +296,6 @@ function CreateChallengeModal({
   onClose: () => void
   onCreated: () => void
 }) {
-  const toast = useToast()
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState<CreateChallengePayload>({
     name: '',
@@ -457,7 +456,6 @@ function RankBadge({ rank }: { rank: number }) {
 
 export function ChallengesPage() {
   const { user } = useAuthStore()
-  const toast = useToast()
 
   // Data
   const [streak, setStreak] = useState<StreakData | null>(null)

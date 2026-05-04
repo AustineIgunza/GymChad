@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ChevronLeft, ChevronRight, Check, Plus, X } from 'lucide-react'
 import { PageHeader } from '../components/ui/PageHeader'
-import { useToast } from '../stores/uiStore'
+import toast from 'react-hot-toast'
 import api from '../services/api'
 
 interface Schedule {
@@ -32,7 +32,6 @@ function fmt(d: Date) {
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 export function SchedulePage() {
-  const toast = useToast()
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
   const [schedule, setSchedule] = useState<Schedule[]>([])
   const [splits, setSplits] = useState<Split[]>([])

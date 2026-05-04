@@ -229,14 +229,6 @@ export function AnalyticsPage() {
     }
   }
 
-  // Date-range filtered calorie data
-  const filteredCalorieData = (() => {
-    if (!days) return calorieData
-    const cutoff = new Date()
-    cutoff.setDate(cutoff.getDate() - days)
-    return (calorieData as any[]).filter(d => new Date(d.date) >= cutoff)
-  })()
-
   return (
     <div className="page px-4">
       <PageHeader title="Analytics" subtitle="Track your progress over time" />

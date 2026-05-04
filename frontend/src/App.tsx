@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAuthStore } from './stores/authStore'
 import { BottomNav } from './components/ui/BottomNav'
 import { SideNav } from './components/ui/SideNav'
-import { ToastContainer } from './components/ui/Toast'
 import { AnimatedBackground } from './components/ui/AnimatedBackground'
 import { useSwipeBack } from './hooks/useSwipeBack'
 
@@ -281,8 +280,7 @@ export default function App() {
     <div className="bg-animated min-h-screen relative">
       <AnimatedBackground />
       <div className="relative" style={{ zIndex: 1 }}>
-        <ToastContainer />
-        <AppRoutes />
+<AppRoutes />
       </div>
     </div>
   )
