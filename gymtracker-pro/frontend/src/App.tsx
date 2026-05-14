@@ -1107,83 +1107,6 @@ function AnalyticsPage() {
   );
 }
 
-// ─── STRENGTH / ESTIMATED 1RM ─────────────────────────────────────────
-function StrengthPage() {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    api.get("/progress/all-1rm")
-      .then((res) => setData(res.data))
-      .catch(() => null)
-      .finally(() => setLoading(false));
-  }, []);
-
-  // Group by muscle group
-  const grouped: Record<string, any[]> = {};
-  data.forEach((item) => {
-    if (!grouped[item.muscleGroup]) grouped[item.muscleGroup] = [];
-    grouped[item.muscleGroup].push(item);
-  });
-
-  const trendIcon = (trend: string) => {
-    if (trend === "up") return "↑";
-    if (trend === "down") return "↓";
-    return "→";
-  };
-  const trendColor = (trend: string) => {
-    if (trend === "up") return "text-green-400";
-    if (trend === "down") return "text-red-400";
-    return "text-gray-400";
-  };
-
-  return (
-    <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
-      <Card title="Estimated 1RM - All Exercises">
-        <p className="text-sm text-gray-400 mb-4">Based on your logged sets using the Epley formula</p>
-
-        {loading && <p className="text-gray-400 text-sm">Loading...</p>}
-
-        {!loading && data.length === 0 && (
-          <p className="text-gray-400 text-center py-8">No workout data yet. Start logging sets to see your estimated 1RMs.</p>
-        )}
-
-        {Object.entries(grouped).map(([muscleGroup, exercises]) => (
-          <div key={muscleGroup} className="mb-6">
-            <h3 className="text-sm font-semibold text-blue-300 mb-2">{muscleGroup}</h3>
-            <div className="space-y-2">
-              {exercises.map((ex) => (
-                <div key={ex.exerciseId} className="bg-gray-700 rounded-lg p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <p className="font-semibold">{ex.exerciseName}</p>
-                      <p className="text-xs text-gray-400">
-                        Best: {ex.bestWeight}kg x {ex.bestReps} | {ex.totalSets} sets logged
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-orange-400">{ex.estimated1RM}<span className="text-sm text-gray-400">kg</span></p>
-                      <p className={`text-xs font-semibold ${trendColor(ex.trend)}`}>
-                        {trendIcon(ex.trend)} {ex.trend}
-                      </p>
-                    </div>
-                  </div>
-                  {ex.latestDate && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Latest: {ex.latestWeight}kg x {ex.latestReps} ({ex.latestDate})
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </Card>
-    </main>
-  );
-}
-
 // ─── AI COACH ──────────────────────────────────────────────────────────
 function CoachPage() {
   const [message, setMessage] = useState("");
@@ -1660,7 +1583,6 @@ export default function App() {
               { to: "/nutrition", icon: "N", label: "Nutrition" },
               { to: "/history", icon: "Hi", label: "History" },
               { to: "/analytics", icon: "A", label: "Analytics" },
-              { to: "/strength", icon: "1RM", label: "Strength" },
               { to: "/coach", icon: "AI", label: "AI Coach" },
               { to: "/splits", icon: "S", label: "Splits" },
             ].map((item) => (
@@ -1702,7 +1624,6 @@ export default function App() {
               <Route path="/nutrition" element={<NutritionPage />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
-              <Route path="/strength" element={<StrengthPage />} />
               <Route path="/coach" element={<CoachPage />} />
               <Route path="/splits" element={<SplitsPage />} />
             </Routes>
@@ -1714,7 +1635,7 @@ export default function App() {
               { to: "/", label: "Home" },
               { to: "/workout", label: "Workout" },
               { to: "/nutrition", label: "Food" },
-              { to: "/strength", label: "1RM" },
+              { to: "/history", label: "History" },
               { to: "/analytics", label: "Stats" },
               { to: "/splits", label: "Splits" },
             ].map((item) => (

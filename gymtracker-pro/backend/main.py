@@ -393,13 +393,6 @@ async def create_split(payload: SplitCreate, user_id: str = Depends(get_user_id)
 async def list_splits(user_id: str = Depends(get_user_id)):
     return [s for s in _splits.values() if s["userId"] == user_id]
 
-@app.get("/api/v1/splits/{split_id}/days")
-async def get_split_days(split_id: str, user_id: str = Depends(get_user_id)):
-    split = _splits.get(split_id)
-    if not split or split["userId"] != user_id:
-        raise HTTPException(404, "Split not found")
-    return split["days"]
-
 @app.get("/api/v1/splits/today")
 async def get_today_split_day(user_id: str = Depends(get_user_id)):
     """Figure out which day of the active split today is based on real calendar date."""
@@ -440,6 +433,13 @@ async def get_today_split_day(user_id: str = Depends(get_user_id)):
         "date": today.strftime("%Y-%m-%d"),
         "dayOfWeek": today.strftime("%A"),
     }
+
+@app.get("/api/v1/splits/{split_id}/days")
+async def get_split_days(split_id: str, user_id: str = Depends(get_user_id)):
+    split = _splits.get(split_id)
+    if not split or split["userId"] != user_id:
+        raise HTTPException(404, "Split not found")
+    return split["days"]
 
 @app.put("/api/v1/splits/{split_id}")
 async def update_split(split_id: str, payload: SplitUpdate, user_id: str = Depends(get_user_id)):
@@ -696,6 +696,39 @@ async def get_today_workout(user_id: str = Depends(get_user_id)):
             return w
     return None
 
+@app.get("/api/v1/workouts/recommendations")
+async def get_recommendations(user_id: str = Depends(get_user_id)):
+    recs = []
+    user_workouts = [w for w in _workouts.values() if w["userId"] == user_id and not w.get("deletedAt")]
+    if not user_workouts:
+        return []
+    exercise_sets: dict = defaultdict(list)
+    for s in _workout_sets.values():
+        if any(w["id"] == s["workoutId"] for w in user_workouts):
+            exercise_sets[s["exerciseId"]].append(s)
+
+    for ex_id, sets in exercise_sets.items():
+        if sets:
+            best = max(sets, key=lambda s: s["weightKg"] * s["reps"])
+            ex = next((e for e in DEFAULT_EXERCISES if e["id"] == ex_id), None)
+            recs.append({
+                "exerciseId": ex_id,
+                "exerciseName": ex["name"] if ex else ex_id,
+                "recommendation": f"Last best: {best['weightKg']}kg x {best['reps']}. Try {best['weightKg'] + 2.5}kg x {best['reps']} or {best['weightKg']}kg x {best['reps'] + 1}",
+            })
+    return recs
+
+@app.get("/api/v1/workouts/history/{exercise_id}")
+async def get_exercise_history(exercise_id: str, user_id: str = Depends(get_user_id)):
+    history = []
+    user_workouts = {w["id"]: w for w in _workouts.values() if w["userId"] == user_id and not w.get("deletedAt")}
+    for s in _workout_sets.values():
+        if s["exerciseId"] == exercise_id and s["workoutId"] in user_workouts:
+            w = user_workouts[s["workoutId"]]
+            history.append({**s, "date": w["date"], "workoutLabel": w["label"]})
+    history.sort(key=lambda x: x["date"], reverse=True)
+    return history
+
 @app.get("/api/v1/workouts/{workout_id}")
 async def get_workout(workout_id: str, user_id: str = Depends(get_user_id)):
     w = _workouts.get(workout_id)
@@ -755,116 +788,6 @@ async def delete_workout_set(workout_id: str, set_id: str, user_id: str = Depend
         raise HTTPException(404, "Set not found")
     del _workout_sets[set_id]
     return None
-
-@app.get("/api/v1/workouts/history/{exercise_id}")
-async def get_exercise_history(exercise_id: str, user_id: str = Depends(get_user_id)):
-    history = []
-    user_workouts = {w["id"]: w for w in _workouts.values() if w["userId"] == user_id and not w.get("deletedAt")}
-    for s in _workout_sets.values():
-        if s["exerciseId"] == exercise_id and s["workoutId"] in user_workouts:
-            w = user_workouts[s["workoutId"]]
-            history.append({**s, "date": w["date"], "workoutLabel": w["label"]})
-    history.sort(key=lambda x: x["date"], reverse=True)
-    return history
-
-# ============================================================================
-# RECOMMENDATIONS
-# ============================================================================
-
-@app.get("/api/v1/workouts/recommendations")
-async def get_recommendations(user_id: str = Depends(get_user_id)):
-    recs = []
-    user_workouts = [w for w in _workouts.values() if w["userId"] == user_id and not w.get("deletedAt")]
-    if not user_workouts:
-        return []
-    exercise_sets: dict = defaultdict(list)
-    for s in _workout_sets.values():
-        if any(w["id"] == s["workoutId"] for w in user_workouts):
-            exercise_sets[s["exerciseId"]].append(s)
-
-    for ex_id, sets in exercise_sets.items():
-        if sets:
-            best = max(sets, key=lambda s: s["weightKg"] * s["reps"])
-            ex = next((e for e in DEFAULT_EXERCISES if e["id"] == ex_id), None)
-            recs.append({
-                "exerciseId": ex_id,
-                "exerciseName": ex["name"] if ex else ex_id,
-                "recommendation": f"Last best: {best['weightKg']}kg x {best['reps']}. Try {best['weightKg'] + 2.5}kg x {best['reps']} or {best['weightKg']}kg x {best['reps'] + 1}",
-            })
-    return recs
-
-# ============================================================================
-# ESTIMATED 1RM FOR ALL EXERCISES
-# ============================================================================
-
-@app.get("/api/v1/progress/all-1rm")
-async def get_all_estimated_1rm(user_id: str = Depends(get_user_id)):
-    """Get estimated 1RM for every exercise the user has ever done."""
-    user_workouts = {w["id"]: w for w in _workouts.values() if w["userId"] == user_id and not w.get("deletedAt")}
-    if not user_workouts:
-        return []
-
-    # Group sets by exercise
-    exercise_sets: dict = defaultdict(list)
-    for s in _workout_sets.values():
-        if s["workoutId"] in user_workouts:
-            w = user_workouts[s["workoutId"]]
-            exercise_sets[s["exerciseId"]].append({**s, "date": w["date"]})
-
-    results = []
-    for ex_id, sets in exercise_sets.items():
-        ex = next((e for e in DEFAULT_EXERCISES if e["id"] == ex_id), None)
-        if not ex:
-            continue
-
-        # Calculate e1RM for each set using Epley formula
-        set_e1rms = []
-        for s in sets:
-            if s["reps"] == 1:
-                e1rm = s["weightKg"]
-            else:
-                e1rm = round(s["weightKg"] * (1 + s["reps"] / 30), 1)
-            set_e1rms.append({"e1rm": e1rm, "date": s["date"], "weightKg": s["weightKg"], "reps": s["reps"]})
-
-        # Sort by date to get progression
-        set_e1rms.sort(key=lambda x: x["date"])
-
-        best = max(set_e1rms, key=lambda x: x["e1rm"])
-        latest = set_e1rms[-1]
-
-        # Get recent trend (last 3 sessions)
-        recent_dates = sorted(set(s["date"] for s in set_e1rms), reverse=True)[:3]
-        recent_best_per_session = []
-        for d in recent_dates:
-            session_sets = [s for s in set_e1rms if s["date"] == d]
-            recent_best_per_session.append(max(session_sets, key=lambda x: x["e1rm"]))
-
-        trend = "stable"
-        if len(recent_best_per_session) >= 2:
-            if recent_best_per_session[0]["e1rm"] > recent_best_per_session[-1]["e1rm"]:
-                trend = "up"
-            elif recent_best_per_session[0]["e1rm"] < recent_best_per_session[-1]["e1rm"]:
-                trend = "down"
-
-        results.append({
-            "exerciseId": ex_id,
-            "exerciseName": ex["name"],
-            "muscleGroup": ex["muscleGroup"],
-            "estimated1RM": best["e1rm"],
-            "bestWeight": best["weightKg"],
-            "bestReps": best["reps"],
-            "latestE1RM": latest["e1rm"],
-            "latestWeight": latest["weightKg"],
-            "latestReps": latest["reps"],
-            "latestDate": latest["date"],
-            "totalSets": len(sets),
-            "trend": trend,
-            "history": set_e1rms[-10:],  # last 10 data points
-        })
-
-    # Sort by muscle group then exercise name
-    results.sort(key=lambda x: (x["muscleGroup"], x["exerciseName"]))
-    return results
 
 # ============================================================================
 # NUTRITION
