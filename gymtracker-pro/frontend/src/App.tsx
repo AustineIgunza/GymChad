@@ -1129,7 +1129,7 @@ function CoachPage() {
       setMessage("");
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "http://localhost:3001/api/v1"}/ai/coach`,
+        `${import.meta.env.VITE_API_URL || "/api/v1"}/ai/coach`,
         {
           method: "POST",
           headers: {
