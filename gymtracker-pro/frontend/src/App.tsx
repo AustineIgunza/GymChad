@@ -13,12 +13,14 @@ function DashboardPage() {
   const [todayWorkout, setTodayWorkout] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
   const [workoutCount, setWorkoutCount] = useState(0);
+  const [todaySplit, setTodaySplit] = useState<any>(null);
 
   useEffect(() => {
     Promise.all([
       api.get("/workouts/today").then((res) => setTodayWorkout(res.data)).catch(() => null),
       api.get("/auth/profile").then((res) => setUser(res.data.user)).catch(() => null),
       api.get("/workouts", { params: { limit: 100 } }).then((res) => setWorkoutCount(res.data.total || 0)).catch(() => null),
+      api.get("/splits/today").then((res) => setTodaySplit(res.data)).catch(() => null),
     ]).catch(() => null);
   }, []);
 
@@ -36,6 +38,14 @@ function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card title="Today's Workout" className="lg:col-span-2">
+          {todaySplit?.splitDay && (
+            <div className="mb-3 bg-purple-900/30 border border-purple-700 rounded-lg p-3">
+              <p className="text-sm font-semibold text-purple-300">
+                {todaySplit.dayOfWeek} - Day {todaySplit.dayIndex}/{todaySplit.totalDays}: {todaySplit.splitDay.label}
+              </p>
+              <p className="text-xs text-gray-400">{todaySplit.split?.name}</p>
+            </div>
+          )}
           {todayWorkout ? (
             <div className="space-y-2">
               <p className="font-semibold">{todayWorkout.label}</p>
@@ -104,15 +114,34 @@ function WorkoutPage() {
   const [weightKg, setWeightKg] = useState(80);
   const [reps, setReps] = useState(8);
   const [rpe, setRpe] = useState(7);
-  const [isWarmup, setIsWarmup] = useState(false);
   const [sets, setSets] = useState<any[]>([]);
   const [recommendations, setRecommendations] = useState<any[]>([]);
   const [label, setLabel] = useState("");
   const [loading, setLoading] = useState(false);
+  const [todaySplit, setTodaySplit] = useState<any>(null);
+  const [splitExercises, setSplitExercises] = useState<any[]>([]);
 
   useEffect(() => {
     api.get("/exercises").then((res) => setExercises(res.data)).catch(() => null);
     api.get("/workouts/recommendations").then((res) => setRecommendations(res.data)).catch(() => null);
+    // Check if there's already a workout today
+    api.get("/workouts/today").then((res) => {
+      if (res.data) {
+        setWorkoutId(res.data.id);
+        setLabel(res.data.label);
+        setSets(res.data.sets || []);
+      }
+    }).catch(() => null);
+    // Fetch today's split day
+    api.get("/splits/today").then((res) => {
+      if (res.data?.splitDay) {
+        setTodaySplit(res.data);
+        setSplitExercises(res.data.splitDay.exercises || []);
+        if (!label) {
+          setLabel(res.data.splitDay.label);
+        }
+      }
+    }).catch(() => null);
   }, []);
 
   const selectedExercise = exercises.find((e) => e.id === selectedExerciseId);
@@ -121,8 +150,13 @@ function WorkoutPage() {
   async function startWorkout() {
     try {
       setLoading(true);
-      const res = await api.post("/workouts", { label: label || "Gym Session" });
+      const workoutLabel = label || todaySplit?.splitDay?.label || "Gym Session";
+      const res = await api.post("/workouts", {
+        label: workoutLabel,
+        splitDayId: todaySplit?.splitDay?.id,
+      });
       setWorkoutId(res.data.id);
+      setLabel(workoutLabel);
       setSets([]);
       toast.success("Workout started!");
     } catch {
@@ -141,11 +175,10 @@ function WorkoutPage() {
       setLoading(true);
       const res = await api.post(`/workouts/${workoutId}/sets`, {
         exerciseId: selectedExerciseId,
-        setNumber: sets.length + 1,
+        setNumber: sets.filter((s) => s.exerciseId === selectedExerciseId).length + 1,
         reps,
         weightKg,
         rpe: rpe || undefined,
-        isWarmup,
       });
       setSets([...sets, res.data]);
       toast.success("Set added!");
@@ -183,13 +216,45 @@ function WorkoutPage() {
     }
   }
 
+  // Group sets by exercise for display
+  const setsByExercise: Record<string, any[]> = {};
+  sets.forEach((s) => {
+    if (!setsByExercise[s.exerciseId]) setsByExercise[s.exerciseId] = [];
+    setsByExercise[s.exerciseId].push(s);
+  });
+
   return (
     <main className="space-y-4 p-4 pb-28">
       {!workoutId ? (
         <Card title="Start Workout">
           <div className="space-y-3">
-            <Input label="Workout Label" placeholder="e.g., Chest Day" value={label} onChange={(e) => setLabel(e.target.value)} />
-            <Button variant="primary" onClick={startWorkout} loading={loading} className="w-full">Start Workout</Button>
+            {todaySplit?.splitDay && (
+              <div className="bg-purple-900/30 border border-purple-700 rounded-lg p-3">
+                <p className="text-sm font-semibold text-purple-300">
+                  {todaySplit.dayOfWeek} - Day {todaySplit.dayIndex}/{todaySplit.totalDays}
+                </p>
+                <p className="text-lg font-bold">{todaySplit.splitDay.label}</p>
+                <p className="text-xs text-gray-400">{todaySplit.split?.name}</p>
+                {splitExercises.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {splitExercises.map((ex: any) => (
+                      <span key={ex.id} className="text-xs bg-gray-700 px-2 py-0.5 rounded">
+                        {ex.exerciseName}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <Input
+              label="Workout Label"
+              placeholder="e.g., Chest Day"
+              value={label || todaySplit?.splitDay?.label || ""}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+            <Button variant="primary" onClick={startWorkout} loading={loading} className="w-full">
+              {todaySplit?.splitDay ? `Start: ${todaySplit.splitDay.label}` : "Start Workout"}
+            </Button>
           </div>
         </Card>
       ) : (
@@ -199,10 +264,41 @@ function WorkoutPage() {
               <div>
                 <p className="text-sm text-gray-400">Active Workout</p>
                 <p className="font-semibold">{label || "Gym Session"}</p>
+                {todaySplit?.splitDay && (
+                  <p className="text-xs text-gray-400">
+                    Day {todaySplit.dayIndex}/{todaySplit.totalDays} - {todaySplit.split?.name}
+                  </p>
+                )}
               </div>
               <Button variant="danger" size="sm" onClick={finishWorkout} loading={loading}>Finish</Button>
             </div>
           </Card>
+
+          {/* Split exercises quick-select */}
+          {splitExercises.length > 0 && (
+            <Card title="Today's Exercises">
+              <div className="flex flex-wrap gap-2">
+                {splitExercises.map((ex: any) => {
+                  const done = sets.some((s) => s.exerciseId === ex.exerciseId);
+                  return (
+                    <button
+                      key={ex.id}
+                      onClick={() => setSelectedExerciseId(ex.exerciseId)}
+                      className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                        selectedExerciseId === ex.exerciseId
+                          ? "bg-blue-600 border-blue-500 text-white"
+                          : done
+                          ? "bg-green-900/30 border-green-700 text-green-300"
+                          : "bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600"
+                      }`}
+                    >
+                      {done && "✓ "}{ex.exerciseName}
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
 
           <Card title="Add Set">
             <div className="space-y-3">
@@ -248,38 +344,37 @@ function WorkoutPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-gray-400">RPE (1-10)</label>
-                  <input type="range" min="1" max="10" value={rpe} onChange={(e) => setRpe(Number(e.target.value))} className="w-full mt-1" />
-                  <p className="text-xs text-center mt-1">{rpe}</p>
-                </div>
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={isWarmup} onChange={(e) => setIsWarmup(e.target.checked)} className="w-4 h-4" />
-                    Warmup Set
-                  </label>
-                </div>
+              <div>
+                <label className="text-xs text-gray-400">RPE (1-10)</label>
+                <input type="range" min="1" max="10" value={rpe} onChange={(e) => setRpe(Number(e.target.value))} className="w-full mt-1" />
+                <p className="text-xs text-center mt-1">{rpe}</p>
               </div>
 
-              <Button variant="primary" onClick={addSet} loading={loading} className="w-full">Add Set ({sets.length + 1})</Button>
+              <Button variant="primary" onClick={addSet} loading={loading} className="w-full">
+                Add Set ({sets.filter((s) => s.exerciseId === selectedExerciseId).length + 1})
+              </Button>
             </div>
           </Card>
 
           {sets.length > 0 && (
             <Card title={`Sets (${sets.length})`}>
-              <div className="space-y-2">
-                {sets.map((set) => {
-                  const ex = exercises.find((e) => e.id === set.exerciseId);
+              <div className="space-y-3">
+                {Object.entries(setsByExercise).map(([exId, exSets]) => {
+                  const ex = exercises.find((e) => e.id === exId);
                   return (
-                    <div key={set.id} className="flex items-center justify-between bg-gray-700 p-3 rounded-lg">
-                      <div className="text-sm">
-                        <p className="font-semibold">{ex?.name}</p>
-                        <p className="text-xs text-gray-400">
-                          {set.weightKg}kg x {set.reps} {set.rpe && `@ RPE ${set.rpe}`} {set.isWarmup && "W"}
-                        </p>
+                    <div key={exId}>
+                      <p className="text-sm font-semibold text-blue-300 mb-1">{ex?.name || exId}</p>
+                      <div className="space-y-1">
+                        {exSets.map((set, idx) => (
+                          <div key={set.id} className="flex items-center justify-between bg-gray-700 p-2 rounded-lg">
+                            <p className="text-sm">
+                              <span className="text-gray-400 mr-2">#{idx + 1}</span>
+                              {set.weightKg}kg x {set.reps} {set.rpe && `@ RPE ${set.rpe}`}
+                            </p>
+                            <Button variant="danger" size="sm" onClick={() => deleteSet(set.id)}>X</Button>
+                          </div>
+                        ))}
                       </div>
-                      <Button variant="danger" size="sm" onClick={() => deleteSet(set.id)}>X</Button>
                     </div>
                   );
                 })}
@@ -292,18 +387,106 @@ function WorkoutPage() {
   );
 }
 
-// ─── SERVING SIZE HELPERS ──────────────────────────────────────────────
-const SERVING_PRESETS = [
-  { label: "100g", grams: 100 },
-  { label: "1 cup (240g)", grams: 240 },
-  { label: "1/2 cup (120g)", grams: 120 },
-  { label: "1 tbsp (15g)", grams: 15 },
-  { label: "1 piece (~150g)", grams: 150 },
-  { label: "1 serving (50g)", grams: 50 },
-  { label: "1 scoop (30g)", grams: 30 },
-  { label: "1 slice (30g)", grams: 30 },
-  { label: "Custom", grams: 0 },
-];
+// ─── SMART SERVING HELPERS ──────────────────────────────────────────────
+
+// Foods that are typically counted in units rather than weighed
+const UNIT_FOODS: Record<string, { unit: string; gramsPerUnit: number }> = {
+  egg: { unit: "egg", gramsPerUnit: 50 },
+  eggs: { unit: "egg", gramsPerUnit: 50 },
+  banana: { unit: "banana", gramsPerUnit: 120 },
+  bananas: { unit: "banana", gramsPerUnit: 120 },
+  apple: { unit: "apple", gramsPerUnit: 180 },
+  apples: { unit: "apple", gramsPerUnit: 180 },
+  orange: { unit: "orange", gramsPerUnit: 130 },
+  oranges: { unit: "orange", gramsPerUnit: 130 },
+  avocado: { unit: "avocado", gramsPerUnit: 150 },
+  slice: { unit: "slice", gramsPerUnit: 30 },
+  tortilla: { unit: "tortilla", gramsPerUnit: 45 },
+  "rice cake": { unit: "cake", gramsPerUnit: 9 },
+};
+
+function getSmartServings(foodName: string, servingSize?: string, servingQty?: number | null) {
+  const lower = foodName.toLowerCase();
+
+  // Check if it's a unit-based food
+  for (const [keyword, info] of Object.entries(UNIT_FOODS)) {
+    if (lower.includes(keyword)) {
+      return {
+        isUnitBased: true,
+        unit: info.unit,
+        gramsPerUnit: info.gramsPerUnit,
+        presets: [
+          { label: `1 ${info.unit}`, grams: info.gramsPerUnit, count: 1 },
+          { label: `2 ${info.unit}s`, grams: info.gramsPerUnit * 2, count: 2 },
+          { label: `3 ${info.unit}s`, grams: info.gramsPerUnit * 3, count: 3 },
+          { label: `4 ${info.unit}s`, grams: info.gramsPerUnit * 4, count: 4 },
+          { label: "Custom", grams: 0, count: 0 },
+        ],
+      };
+    }
+  }
+
+  // Weight-based foods with smart presets
+  const presets = [
+    { label: "100g", grams: 100 },
+    { label: "150g", grams: 150 },
+    { label: "200g", grams: 200 },
+    { label: "250g", grams: 250 },
+  ];
+
+  // Add a product serving if available
+  if (servingQty && servingQty > 0) {
+    presets.unshift({ label: servingSize || `${servingQty}g`, grams: servingQty });
+  }
+
+  // Chicken/meat specific
+  if (lower.includes("chicken") || lower.includes("beef") || lower.includes("turkey") || lower.includes("steak") || lower.includes("fish") || lower.includes("salmon") || lower.includes("tuna")) {
+    return {
+      isUnitBased: false,
+      unit: "g",
+      presets: [
+        { label: "100g", grams: 100 },
+        { label: "150g", grams: 150 },
+        { label: "200g", grams: 200 },
+        { label: "300g", grams: 300 },
+        ...(servingQty ? [{ label: servingSize || `${servingQty}g`, grams: servingQty }] : []),
+        { label: "Custom", grams: 0 },
+      ],
+    };
+  }
+
+  // Rice/pasta/oats
+  if (lower.includes("rice") || lower.includes("pasta") || lower.includes("oats") || lower.includes("oatmeal")) {
+    return {
+      isUnitBased: false,
+      unit: "g",
+      presets: [
+        { label: "50g (dry)", grams: 50 },
+        { label: "75g (dry)", grams: 75 },
+        { label: "100g (dry)", grams: 100 },
+        { label: "1 cup cooked (200g)", grams: 200 },
+        { label: "Custom", grams: 0 },
+      ],
+    };
+  }
+
+  // Protein powder/scoop
+  if (lower.includes("whey") || lower.includes("protein") || lower.includes("powder") || lower.includes("scoop")) {
+    return {
+      isUnitBased: false,
+      unit: "g",
+      presets: [
+        { label: "1 scoop (30g)", grams: 30 },
+        { label: "2 scoops (60g)", grams: 60 },
+        { label: "Custom", grams: 0 },
+      ],
+    };
+  }
+
+  presets.push({ label: "Custom", grams: 0 });
+
+  return { isUnitBased: false, unit: "g", presets };
+}
 
 // ─── NUTRITION LOGGER ──────────────────────────────────────────────────
 function NutritionPage() {
@@ -314,18 +497,20 @@ function NutritionPage() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedFood, setSelectedFood] = useState<any>(null);
   const [quantityG, setQuantityG] = useState(100);
+  const [unitCount, setUnitCount] = useState(1);
   const [selectedServing, setSelectedServing] = useState("100g");
   const [customFoods, setCustomFoods] = useState<any[]>([]);
   const [mealType, setMealType] = useState("SNACK");
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
-  // Manual entry state
   const [showManual, setShowManual] = useState(false);
   const [manualName, setManualName] = useState("");
   const [manualCalories, setManualCalories] = useState(0);
   const [manualProtein, setManualProtein] = useState(0);
   const [manualCarbs, setManualCarbs] = useState(0);
   const [manualFat, setManualFat] = useState(0);
+  // Cart for batch adding
+  const [cart, setCart] = useState<any[]>([]);
 
   useEffect(() => {
     api.get("/foods/custom").then((res) => setCustomFoods(res.data)).catch(() => null);
@@ -357,15 +542,60 @@ function NutritionPage() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  function handleServingChange(label: string) {
-    setSelectedServing(label);
-    const preset = SERVING_PRESETS.find((p) => p.label === label);
-    if (preset && preset.grams > 0) {
-      setQuantityG(preset.grams);
+  function addToCart(food: any) {
+    const scale = quantityG / 100;
+    cart.push({
+      food,
+      quantityG,
+      servingLabel: selectedServing,
+      calories: Math.round(food.caloriesPer100g * scale),
+      proteinG: Number((food.proteinPer100g * scale).toFixed(1)),
+      carbsG: Number((food.carbsPer100g * scale).toFixed(1)),
+      fatG: Number((food.fatPer100g * scale).toFixed(1)),
+    });
+    setCart([...cart]);
+    setSelectedFood(null);
+    setQuery("");
+    setQuantityG(100);
+    setUnitCount(1);
+    setSelectedServing("100g");
+    toast.success(`${food.name} added to cart`);
+  }
+
+  function removeFromCart(index: number) {
+    const newCart = [...cart];
+    newCart.splice(index, 1);
+    setCart(newCart);
+  }
+
+  async function logCart() {
+    if (cart.length === 0) return;
+    try {
+      setLoading(true);
+      const items = cart.map((item) => ({
+        mealType,
+        foodName: item.food.name,
+        calories: item.calories,
+        proteinG: item.proteinG,
+        carbsG: item.carbsG,
+        fatG: item.fatG,
+        quantityG: item.quantityG,
+        servingUnit: item.servingLabel,
+        openFoodFactsId: item.food.id,
+        date,
+      }));
+      await api.post("/nutrition/batch", { items });
+      toast.success(`${cart.length} items logged!`);
+      setCart([]);
+      loadLogs();
+    } catch {
+      toast.error("Failed to log foods");
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function addFood(food: any) {
+  async function addSingleFood(food: any) {
     try {
       setLoading(true);
       const scale = quantityG / 100;
@@ -385,6 +615,7 @@ function NutritionPage() {
       setSelectedFood(null);
       setQuery("");
       setQuantityG(100);
+      setUnitCount(1);
       setSelectedServing("100g");
       loadLogs();
     } catch {
@@ -436,6 +667,9 @@ function NutritionPage() {
     }
   }
 
+  // Smart serving info for selected food
+  const smartServing = selectedFood ? getSmartServings(selectedFood.name, selectedFood.servingSize, selectedFood.servingQuantity) : null;
+
   const calorieTarget = 2200;
 
   return (
@@ -475,22 +709,11 @@ function NutritionPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card title="Log Food" className="lg:col-span-2">
           <div className="space-y-3">
-            {/* Toggle: Search vs Manual */}
             <div className="flex gap-2">
-              <Button
-                variant={!showManual ? "primary" : "secondary"}
-                size="sm"
-                onClick={() => setShowManual(false)}
-                className="flex-1"
-              >
+              <Button variant={!showManual ? "primary" : "secondary"} size="sm" onClick={() => setShowManual(false)} className="flex-1">
                 Search
               </Button>
-              <Button
-                variant={showManual ? "primary" : "secondary"}
-                size="sm"
-                onClick={() => setShowManual(true)}
-                className="flex-1"
-              >
+              <Button variant={showManual ? "primary" : "secondary"} size="sm" onClick={() => setShowManual(true)} className="flex-1">
                 Manual Entry
               </Button>
             </div>
@@ -509,7 +732,6 @@ function NutritionPage() {
             </select>
 
             {showManual ? (
-              /* ── Manual Entry Form ── */
               <div className="bg-gray-700 rounded-lg p-4 space-y-3">
                 <Input label="Food Name" placeholder="e.g., 2 eggs, rice bowl" value={manualName} onChange={(e) => setManualName(e.target.value)} />
                 <div className="grid grid-cols-2 gap-2">
@@ -535,64 +757,93 @@ function NutritionPage() {
                 </Button>
               </div>
             ) : selectedFood ? (
-              /* ── Selected Food with Serving Sizes ── */
               <div className="bg-gray-700 rounded-lg p-4 space-y-3">
                 <p className="font-semibold">{selectedFood.name}</p>
                 <div className="text-sm text-gray-400">
                   {selectedFood.caloriesPer100g} kcal / 100g
-                  {selectedFood.servingSize && ` | Serving: ${selectedFood.servingSize}`}
                 </div>
 
-                {/* Serving size selector */}
-                <div>
-                  <label className="text-xs text-gray-400">Serving Size</label>
-                  <div className="flex flex-wrap gap-1.5 mt-1">
-                    {SERVING_PRESETS.map((preset) => (
-                      <button
-                        key={preset.label}
-                        onClick={() => handleServingChange(preset.label)}
-                        className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-                          selectedServing === preset.label
-                            ? "bg-blue-600 border-blue-500 text-white"
-                            : "bg-gray-600 border-gray-500 text-gray-300 hover:bg-gray-500"
-                        }`}
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                    {selectedFood.servingQuantity && (
-                      <button
-                        onClick={() => {
-                          setSelectedServing("product serving");
-                          setQuantityG(selectedFood.servingQuantity);
-                        }}
-                        className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-                          selectedServing === "product serving"
-                            ? "bg-blue-600 border-blue-500 text-white"
-                            : "bg-gray-600 border-gray-500 text-gray-300 hover:bg-gray-500"
-                        }`}
-                      >
-                        {selectedFood.servingSize || `${selectedFood.servingQuantity}g`}
-                      </button>
-                    )}
+                {/* Smart serving selector */}
+                {smartServing && (
+                  <div>
+                    <label className="text-xs text-gray-400">
+                      {smartServing.isUnitBased ? "How many?" : "Serving Size"}
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {smartServing.presets.map((preset: any) => (
+                        <button
+                          key={preset.label}
+                          onClick={() => {
+                            setSelectedServing(preset.label);
+                            if (preset.grams > 0) {
+                              setQuantityG(preset.grams);
+                              if (smartServing.isUnitBased && preset.count) {
+                                setUnitCount(preset.count);
+                              }
+                            }
+                          }}
+                          className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                            selectedServing === preset.label
+                              ? "bg-blue-600 border-blue-500 text-white"
+                              : "bg-gray-600 border-gray-500 text-gray-300 hover:bg-gray-500"
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Custom quantity input */}
+                {/* Quantity input */}
                 <div>
-                  <label className="text-xs text-gray-400">Quantity (grams)</label>
-                  <input
-                    type="number"
-                    value={quantityG}
-                    onChange={(e) => {
-                      setQuantityG(Number(e.target.value));
-                      setSelectedServing("Custom");
-                    }}
-                    className="w-full mt-1 px-3 py-2 rounded bg-gray-600 text-white"
-                  />
+                  {smartServing?.isUnitBased ? (
+                    <div>
+                      <label className="text-xs text-gray-400">Count</label>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Button size="sm" variant="secondary" onClick={() => {
+                          const n = Math.max(1, unitCount - 1);
+                          setUnitCount(n);
+                          setQuantityG(n * (smartServing.gramsPerUnit || 100));
+                          setSelectedServing(`${n} ${smartServing.unit}${n > 1 ? "s" : ""}`);
+                        }}>-</Button>
+                        <input
+                          type="number"
+                          value={unitCount}
+                          onChange={(e) => {
+                            const n = Math.max(1, Number(e.target.value) || 1);
+                            setUnitCount(n);
+                            setQuantityG(n * (smartServing.gramsPerUnit || 100));
+                            setSelectedServing(`${n} ${smartServing.unit}${n > 1 ? "s" : ""}`);
+                          }}
+                          className="w-20 px-3 py-2 rounded bg-gray-600 text-white text-center"
+                        />
+                        <Button size="sm" variant="secondary" onClick={() => {
+                          const n = unitCount + 1;
+                          setUnitCount(n);
+                          setQuantityG(n * (smartServing.gramsPerUnit || 100));
+                          setSelectedServing(`${n} ${smartServing.unit}${n > 1 ? "s" : ""}`);
+                        }}>+</Button>
+                        <span className="text-sm text-gray-400">= {quantityG}g</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-xs text-gray-400">Quantity (grams)</label>
+                      <input
+                        type="number"
+                        value={quantityG}
+                        onChange={(e) => {
+                          setQuantityG(Number(e.target.value));
+                          setSelectedServing("Custom");
+                        }}
+                        className="w-full mt-1 px-3 py-2 rounded bg-gray-600 text-white"
+                      />
+                    </div>
+                  )}
                 </div>
 
-                {/* Preview of macros for selected serving */}
+                {/* Macro preview */}
                 <div className="grid grid-cols-4 gap-2 text-center text-xs">
                   <div className="bg-gray-600 rounded p-2">
                     <p className="font-bold text-green-300">{Math.round(selectedFood.caloriesPer100g * quantityG / 100)}</p>
@@ -613,18 +864,20 @@ function NutritionPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button variant="primary" size="sm" onClick={() => addFood(selectedFood)} loading={loading} className="flex-1">
-                    Add
+                  <Button variant="primary" size="sm" onClick={() => addSingleFood(selectedFood)} loading={loading} className="flex-1">
+                    Log Now
                   </Button>
-                  <Button variant="secondary" size="sm" onClick={() => { setSelectedFood(null); setQuantityG(100); setSelectedServing("100g"); }} className="flex-1">
+                  <Button variant="secondary" size="sm" onClick={() => addToCart(selectedFood)} className="flex-1">
+                    + Cart
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => { setSelectedFood(null); setQuantityG(100); setUnitCount(1); setSelectedServing("100g"); }}>
                     Cancel
                   </Button>
                 </div>
               </div>
             ) : (
-              /* ── Search Results ── */
               <>
-                <Input placeholder="Search foods (e.g., rice, chicken breast)..." value={query} onChange={(e) => setQuery(e.target.value)} />
+                <Input placeholder="Search foods (e.g., rice, chicken breast, eggs)..." value={query} onChange={(e) => setQuery(e.target.value)} />
                 {searching && <p className="text-xs text-gray-400">Searching...</p>}
                 <div className="space-y-2 max-h-80 lg:max-h-96 overflow-y-auto">
                   {searchResults.map((food) => (
@@ -633,8 +886,12 @@ function NutritionPage() {
                       className="bg-gray-700 rounded-lg p-3 cursor-pointer hover:bg-gray-600 transition-colors"
                       onClick={() => {
                         setSelectedFood(food);
-                        // If product has a serving size, default to it
-                        if (food.servingQuantity) {
+                        const smart = getSmartServings(food.name, food.servingSize, food.servingQuantity);
+                        if (smart.isUnitBased) {
+                          setQuantityG(smart.presets[0].grams);
+                          setUnitCount(1);
+                          setSelectedServing(smart.presets[0].label);
+                        } else if (food.servingQuantity) {
                           setQuantityG(food.servingQuantity);
                           setSelectedServing("product serving");
                         } else {
@@ -675,6 +932,29 @@ function NutritionPage() {
                   )}
                 </div>
               </>
+            )}
+
+            {/* Cart */}
+            {cart.length > 0 && (
+              <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-3 space-y-2">
+                <p className="text-sm font-semibold text-blue-300">Cart ({cart.length} items)</p>
+                {cart.map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-sm">
+                    <div className="flex-1">
+                      <span>{item.food.name}</span>
+                      <span className="text-xs text-gray-400 ml-2">{item.calories} kcal</span>
+                    </div>
+                    <button onClick={() => removeFromCart(idx)} className="text-red-400 hover:text-red-300 text-xs ml-2">Remove</button>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between text-sm font-semibold border-t border-blue-700 pt-2">
+                  <span>Total</span>
+                  <span>{cart.reduce((sum, i) => sum + i.calories, 0)} kcal | P:{cart.reduce((sum, i) => sum + i.proteinG, 0).toFixed(1)}g</span>
+                </div>
+                <Button variant="primary" size="sm" onClick={logCart} loading={loading} className="w-full">
+                  Log All ({cart.length} items)
+                </Button>
+              </div>
             )}
           </div>
         </Card>
@@ -827,6 +1107,83 @@ function AnalyticsPage() {
   );
 }
 
+// ─── STRENGTH / ESTIMATED 1RM ─────────────────────────────────────────
+function StrengthPage() {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get("/progress/all-1rm")
+      .then((res) => setData(res.data))
+      .catch(() => null)
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Group by muscle group
+  const grouped: Record<string, any[]> = {};
+  data.forEach((item) => {
+    if (!grouped[item.muscleGroup]) grouped[item.muscleGroup] = [];
+    grouped[item.muscleGroup].push(item);
+  });
+
+  const trendIcon = (trend: string) => {
+    if (trend === "up") return "↑";
+    if (trend === "down") return "↓";
+    return "→";
+  };
+  const trendColor = (trend: string) => {
+    if (trend === "up") return "text-green-400";
+    if (trend === "down") return "text-red-400";
+    return "text-gray-400";
+  };
+
+  return (
+    <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
+      <Card title="Estimated 1RM - All Exercises">
+        <p className="text-sm text-gray-400 mb-4">Based on your logged sets using the Epley formula</p>
+
+        {loading && <p className="text-gray-400 text-sm">Loading...</p>}
+
+        {!loading && data.length === 0 && (
+          <p className="text-gray-400 text-center py-8">No workout data yet. Start logging sets to see your estimated 1RMs.</p>
+        )}
+
+        {Object.entries(grouped).map(([muscleGroup, exercises]) => (
+          <div key={muscleGroup} className="mb-6">
+            <h3 className="text-sm font-semibold text-blue-300 mb-2">{muscleGroup}</h3>
+            <div className="space-y-2">
+              {exercises.map((ex) => (
+                <div key={ex.exerciseId} className="bg-gray-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="font-semibold">{ex.exerciseName}</p>
+                      <p className="text-xs text-gray-400">
+                        Best: {ex.bestWeight}kg x {ex.bestReps} | {ex.totalSets} sets logged
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-orange-400">{ex.estimated1RM}<span className="text-sm text-gray-400">kg</span></p>
+                      <p className={`text-xs font-semibold ${trendColor(ex.trend)}`}>
+                        {trendIcon(ex.trend)} {ex.trend}
+                      </p>
+                    </div>
+                  </div>
+                  {ex.latestDate && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Latest: {ex.latestWeight}kg x {ex.latestReps} ({ex.latestDate})
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </Card>
+    </main>
+  );
+}
+
 // ─── AI COACH ──────────────────────────────────────────────────────────
 function CoachPage() {
   const [message, setMessage] = useState("");
@@ -964,6 +1321,8 @@ function SplitsPage() {
   const [splits, setSplits] = useState<any[]>([]);
   const [newSplitName, setNewSplitName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [genDays, setGenDays] = useState(4);
 
   useEffect(() => { loadSplits(); }, []);
 
@@ -997,6 +1356,19 @@ function SplitsPage() {
     }
   }
 
+  async function generateProgram() {
+    try {
+      setGenerating(true);
+      await api.post("/programs/generate", { daysPerWeek: genDays });
+      toast.success("Program generated!");
+      await loadSplits();
+    } catch {
+      toast.error("Failed to generate program");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   async function activateSplit(id: string) {
     try {
       await api.put(`/splits/${id}/activate`);
@@ -1019,6 +1391,37 @@ function SplitsPage() {
 
   return (
     <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
+      {/* Generate Program */}
+      <Card title="Generate Program">
+        <div className="space-y-3">
+          <p className="text-sm text-gray-400">Auto-generate a training split based on how many days per week you train.</p>
+          <div className="flex gap-2 flex-wrap">
+            {[2, 3, 4, 5, 6, 7].map((d) => (
+              <button
+                key={d}
+                onClick={() => setGenDays(d)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  genDays === d ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                }`}
+              >
+                {d} days
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400">
+            {genDays === 2 && "Upper/Lower split"}
+            {genDays === 3 && "Push/Pull/Legs split"}
+            {genDays === 4 && "Upper/Lower x2 (strength + hypertrophy)"}
+            {genDays === 5 && "PPL + Upper/Lower hybrid"}
+            {genDays === 6 && "Push/Pull/Legs x2"}
+            {genDays === 7 && "Bro Split (one muscle group per day)"}
+          </p>
+          <Button variant="primary" onClick={generateProgram} loading={generating} className="w-full">
+            Generate {genDays}-Day Program
+          </Button>
+        </div>
+      </Card>
+
       <Card title="Splits Manager">
         <div className="space-y-4">
           <div className="flex gap-2 flex-col sm:flex-row">
@@ -1031,7 +1434,7 @@ function SplitsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {splits.length === 0 ? (
-                <p className="text-gray-400 text-sm text-center py-8 col-span-full">No splits created yet</p>
+                <p className="text-gray-400 text-sm text-center py-8 col-span-full">No splits created yet. Generate a program above or create one manually.</p>
               ) : (
                 splits.map((split) => (
                   <div key={split.id} className="bg-gray-700 rounded-lg p-4">
@@ -1042,6 +1445,15 @@ function SplitsPage() {
                       </div>
                       {split.isActive && <Badge color="green">Active</Badge>}
                     </div>
+                    {split.days && split.days.length > 0 && (
+                      <div className="mb-3 space-y-1">
+                        {split.days.map((day: any) => (
+                          <p key={day.id} className="text-xs text-gray-400">
+                            Day {day.dayNumber}: {day.label} ({day.exercises?.length || 0} exercises)
+                          </p>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex gap-2 flex-col sm:flex-row">
                       {!split.isActive && (
                         <Button variant="secondary" size="sm" onClick={() => activateSplit(split.id)} className="flex-1">Activate</Button>
@@ -1087,7 +1499,6 @@ function HistoryPage() {
 
   return (
     <main className="space-y-4 p-4 lg:p-8 pb-28 lg:pb-8 max-w-6xl mx-auto w-full">
-      {/* Period selector */}
       <Card>
         <div className="flex gap-2 justify-center">
           {(["week", "month", "year"] as const).map((p) => (
@@ -1118,7 +1529,6 @@ function HistoryPage() {
 
       {data && !loading && (
         <>
-          {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Card>
               <div className="text-center">
@@ -1146,7 +1556,6 @@ function HistoryPage() {
             </Card>
           </div>
 
-          {/* Daily nutrition chart */}
           {data.dailyNutrition.length > 0 && (
             <Card title="Daily Calories">
               <div className="h-48 lg:h-56">
@@ -1163,7 +1572,6 @@ function HistoryPage() {
             </Card>
           )}
 
-          {/* Workout list */}
           {data.workouts.length > 0 && (
             <Card title="Workouts">
               <div className="space-y-3 max-h-96 overflow-y-auto">
@@ -1192,7 +1600,6 @@ function HistoryPage() {
             </Card>
           )}
 
-          {/* Nutrition entries */}
           {data.dailyNutrition.length > 0 && (
             <Card title="Daily Nutrition Breakdown">
               <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -1253,6 +1660,7 @@ export default function App() {
               { to: "/nutrition", icon: "N", label: "Nutrition" },
               { to: "/history", icon: "Hi", label: "History" },
               { to: "/analytics", icon: "A", label: "Analytics" },
+              { to: "/strength", icon: "1RM", label: "Strength" },
               { to: "/coach", icon: "AI", label: "AI Coach" },
               { to: "/splits", icon: "S", label: "Splits" },
             ].map((item) => (
@@ -1294,6 +1702,7 @@ export default function App() {
               <Route path="/nutrition" element={<NutritionPage />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/strength" element={<StrengthPage />} />
               <Route path="/coach" element={<CoachPage />} />
               <Route path="/splits" element={<SplitsPage />} />
             </Routes>
@@ -1305,7 +1714,7 @@ export default function App() {
               { to: "/", label: "Home" },
               { to: "/workout", label: "Workout" },
               { to: "/nutrition", label: "Food" },
-              { to: "/history", label: "History" },
+              { to: "/strength", label: "1RM" },
               { to: "/analytics", label: "Stats" },
               { to: "/splits", label: "Splits" },
             ].map((item) => (

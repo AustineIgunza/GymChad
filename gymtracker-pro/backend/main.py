@@ -63,34 +63,39 @@ app.add_middleware(
 # IN-MEMORY STORAGE
 # ============================================================================
 
-# All data keyed by user_id
 _users: dict = {}
-_splits: dict = {}           # split_id -> split dict
-_workouts: dict = {}         # workout_id -> workout dict
-_workout_sets: dict = {}     # set_id -> set dict
-_nutrition_logs: dict = {}   # log_id -> log dict
-_custom_foods: dict = {}     # food_id -> food dict
+_splits: dict = {}
+_workouts: dict = {}
+_workout_sets: dict = {}
+_nutrition_logs: dict = {}
+_custom_foods: dict = {}
 
-# Default exercises available to all users
 DEFAULT_EXERCISES = [
     {"id": "ex_bench", "name": "Bench Press", "muscleGroup": "CHEST", "equipment": "Barbell", "isCustom": False, "userId": None},
     {"id": "ex_incline_bench", "name": "Incline Bench Press", "muscleGroup": "CHEST", "equipment": "Barbell", "isCustom": False, "userId": None},
     {"id": "ex_dumbbell_fly", "name": "Dumbbell Fly", "muscleGroup": "CHEST", "equipment": "Dumbbell", "isCustom": False, "userId": None},
+    {"id": "ex_cable_crossover", "name": "Cable Crossover", "muscleGroup": "CHEST", "equipment": "Cable", "isCustom": False, "userId": None},
     {"id": "ex_squat", "name": "Squats", "muscleGroup": "LEGS", "equipment": "Barbell", "isCustom": False, "userId": None},
     {"id": "ex_leg_press", "name": "Leg Press", "muscleGroup": "LEGS", "equipment": "Machine", "isCustom": False, "userId": None},
     {"id": "ex_leg_curl", "name": "Leg Curl", "muscleGroup": "LEGS", "equipment": "Machine", "isCustom": False, "userId": None},
     {"id": "ex_leg_ext", "name": "Leg Extension", "muscleGroup": "LEGS", "equipment": "Machine", "isCustom": False, "userId": None},
+    {"id": "ex_romanian_dl", "name": "Romanian Deadlift", "muscleGroup": "LEGS", "equipment": "Barbell", "isCustom": False, "userId": None},
+    {"id": "ex_calf_raise", "name": "Calf Raise", "muscleGroup": "LEGS", "equipment": "Machine", "isCustom": False, "userId": None},
     {"id": "ex_deadlift", "name": "Deadlift", "muscleGroup": "BACK", "equipment": "Barbell", "isCustom": False, "userId": None},
     {"id": "ex_lat_pulldown", "name": "Lat Pulldown", "muscleGroup": "BACK", "equipment": "Cable", "isCustom": False, "userId": None},
     {"id": "ex_barbell_row", "name": "Barbell Row", "muscleGroup": "BACK", "equipment": "Barbell", "isCustom": False, "userId": None},
     {"id": "ex_seated_row", "name": "Seated Cable Row", "muscleGroup": "BACK", "equipment": "Cable", "isCustom": False, "userId": None},
+    {"id": "ex_pullup", "name": "Pull-Up", "muscleGroup": "BACK", "equipment": "Bodyweight", "isCustom": False, "userId": None},
     {"id": "ex_ohp", "name": "Overhead Press", "muscleGroup": "SHOULDERS", "equipment": "Barbell", "isCustom": False, "userId": None},
     {"id": "ex_lateral_raise", "name": "Lateral Raise", "muscleGroup": "SHOULDERS", "equipment": "Dumbbell", "isCustom": False, "userId": None},
     {"id": "ex_face_pull", "name": "Face Pull", "muscleGroup": "SHOULDERS", "equipment": "Cable", "isCustom": False, "userId": None},
+    {"id": "ex_rear_delt_fly", "name": "Rear Delt Fly", "muscleGroup": "SHOULDERS", "equipment": "Dumbbell", "isCustom": False, "userId": None},
     {"id": "ex_bicep_curl", "name": "Bicep Curl", "muscleGroup": "BICEPS", "equipment": "Dumbbell", "isCustom": False, "userId": None},
     {"id": "ex_hammer_curl", "name": "Hammer Curl", "muscleGroup": "BICEPS", "equipment": "Dumbbell", "isCustom": False, "userId": None},
+    {"id": "ex_preacher_curl", "name": "Preacher Curl", "muscleGroup": "BICEPS", "equipment": "Barbell", "isCustom": False, "userId": None},
     {"id": "ex_tricep_pushdown", "name": "Tricep Pushdown", "muscleGroup": "TRICEPS", "equipment": "Cable", "isCustom": False, "userId": None},
     {"id": "ex_skull_crusher", "name": "Skull Crusher", "muscleGroup": "TRICEPS", "equipment": "Barbell", "isCustom": False, "userId": None},
+    {"id": "ex_tricep_dip", "name": "Tricep Dip", "muscleGroup": "TRICEPS", "equipment": "Bodyweight", "isCustom": False, "userId": None},
     {"id": "ex_hip_thrust", "name": "Hip Thrust", "muscleGroup": "GLUTES", "equipment": "Barbell", "isCustom": False, "userId": None},
     {"id": "ex_plank", "name": "Plank", "muscleGroup": "CORE", "equipment": "Bodyweight", "isCustom": False, "userId": None},
     {"id": "ex_cable_crunch", "name": "Cable Crunch", "muscleGroup": "CORE", "equipment": "Cable", "isCustom": False, "userId": None},
@@ -137,7 +142,6 @@ class WorkoutSetCreate(BaseModel):
     reps: int = Field(..., gt=0)
     weightKg: float = Field(..., ge=0)
     rpe: Optional[int] = Field(None, ge=1, le=10)
-    isWarmup: bool = False
 
 class NutritionCreate(BaseModel):
     mealType: str
@@ -151,6 +155,9 @@ class NutritionCreate(BaseModel):
     openFoodFactsId: Optional[str] = None
     date: Optional[str] = None
 
+class NutritionBatchCreate(BaseModel):
+    items: List[NutritionCreate]
+
 class CustomFoodCreate(BaseModel):
     name: str
     calories: int = Field(..., ge=0)
@@ -162,13 +169,17 @@ class AICoachRequest(BaseModel):
     message: str
     conversationHistory: List[dict] = []
 
+class ProgramGenerateRequest(BaseModel):
+    goal: str = "BULKING"
+    daysPerWeek: int = Field(4, ge=2, le=7)
+    experience: str = "intermediate"
+
 # ============================================================================
 # DEPENDENCIES
 # ============================================================================
 
 async def get_user_id(x_user_id: str = Header(default="demo-user")) -> str:
     clean_id = ''.join(c for c in x_user_id if c.isalnum() or c in '_-')[:64] or "demo-user"
-    # Auto-create user profile if not exists
     if clean_id not in _users:
         _users[clean_id] = {
             "id": clean_id,
@@ -211,7 +222,6 @@ class FoodCache:
 food_cache = FoodCache()
 
 async def search_open_food_facts(query: str) -> list:
-    """Search Open Food Facts with English language filter"""
     cache_key = f"food:{query.lower().strip()}"
     cached = food_cache.get(cache_key)
     if cached is not None:
@@ -219,7 +229,6 @@ async def search_open_food_facts(query: str) -> list:
 
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            # Use English-specific search with language filters
             response = await client.get(
                 "https://world.openfoodfacts.org/cgi/search.pl",
                 params={
@@ -240,16 +249,12 @@ async def search_open_food_facts(query: str) -> list:
                 try:
                     nutriments = product.get("nutriments", {})
                     calories = float(nutriments.get("energy-kcal_100g", 0))
-                    # Prefer English name, fall back to generic name
                     name = product.get("product_name_en") or product.get("product_name", "")
-                    # Skip products without English name or with non-Latin characters
                     if not name or calories <= 0:
                         continue
-                    # Filter out non-English names (basic heuristic)
                     try:
                         name.encode("ascii")
                     except UnicodeEncodeError:
-                        # Allow if it's mostly ASCII
                         ascii_chars = sum(1 for c in name if ord(c) < 128)
                         if ascii_chars / len(name) < 0.7:
                             continue
@@ -270,7 +275,6 @@ async def search_open_food_facts(query: str) -> list:
                 except (ValueError, KeyError):
                     continue
 
-            # Sort: prefer results where query appears at start of name
             query_lower = query.lower()
             results.sort(key=lambda r: (
                 0 if r["name"].lower().startswith(query_lower) else
@@ -396,6 +400,47 @@ async def get_split_days(split_id: str, user_id: str = Depends(get_user_id)):
         raise HTTPException(404, "Split not found")
     return split["days"]
 
+@app.get("/api/v1/splits/today")
+async def get_today_split_day(user_id: str = Depends(get_user_id)):
+    """Figure out which day of the active split today is based on real calendar date."""
+    user = _users.get(user_id)
+    if not user or not user.get("currentSplitId"):
+        return {"splitDay": None, "split": None, "dayIndex": None, "date": datetime.now().strftime("%Y-%m-%d")}
+
+    split = _splits.get(user["currentSplitId"])
+    if not split or not split.get("days"):
+        return {"splitDay": None, "split": None, "dayIndex": None, "date": datetime.now().strftime("%Y-%m-%d")}
+
+    # Use the split's creation date as the cycle start anchor
+    split_created = datetime.fromisoformat(split["createdAt"].replace("Z", "+00:00")) if "Z" in split["createdAt"] else datetime.fromisoformat(split["createdAt"])
+    today = datetime.now()
+    days_since = (today.date() - split_created.date()).days
+    num_days = len(split["days"])
+    day_index = days_since % num_days
+
+    # Sort days by dayNumber to get consistent ordering
+    sorted_days = sorted(split["days"], key=lambda d: d["dayNumber"])
+    today_day = sorted_days[day_index]
+
+    # Resolve exercise names
+    exercises_with_names = []
+    for ex in today_day.get("exercises", []):
+        exercise_info = next((e for e in DEFAULT_EXERCISES if e["id"] == ex["exerciseId"]), None)
+        exercises_with_names.append({
+            **ex,
+            "exerciseName": exercise_info["name"] if exercise_info else ex["exerciseId"],
+            "muscleGroup": exercise_info["muscleGroup"] if exercise_info else "UNKNOWN",
+        })
+
+    return {
+        "splitDay": {**today_day, "exercises": exercises_with_names},
+        "split": {"id": split["id"], "name": split["name"]},
+        "dayIndex": day_index + 1,
+        "totalDays": num_days,
+        "date": today.strftime("%Y-%m-%d"),
+        "dayOfWeek": today.strftime("%A"),
+    }
+
 @app.put("/api/v1/splits/{split_id}")
 async def update_split(split_id: str, payload: SplitUpdate, user_id: str = Depends(get_user_id)):
     split = _splits.get(split_id)
@@ -442,8 +487,167 @@ async def delete_split(split_id: str, user_id: str = Depends(get_user_id)):
     split = _splits.get(split_id)
     if not split or split["userId"] != user_id:
         raise HTTPException(404, "Split not found")
+    if _users[user_id].get("currentSplitId") == split_id:
+        _users[user_id]["currentSplitId"] = None
     del _splits[split_id]
     return None
+
+# ============================================================================
+# PROGRAM GENERATION
+# ============================================================================
+
+PROGRAM_TEMPLATES = {
+    2: {
+        "name": "Upper/Lower",
+        "days": [
+            {"dayNumber": 1, "label": "Upper Body", "exercises": [
+                "ex_bench", "ex_barbell_row", "ex_ohp", "ex_lat_pulldown", "ex_bicep_curl", "ex_tricep_pushdown"
+            ]},
+            {"dayNumber": 2, "label": "Lower Body", "exercises": [
+                "ex_squat", "ex_romanian_dl", "ex_leg_press", "ex_leg_curl", "ex_calf_raise", "ex_cable_crunch"
+            ]},
+        ],
+    },
+    3: {
+        "name": "Push/Pull/Legs",
+        "days": [
+            {"dayNumber": 1, "label": "Push", "exercises": [
+                "ex_bench", "ex_incline_bench", "ex_ohp", "ex_lateral_raise", "ex_tricep_pushdown", "ex_skull_crusher"
+            ]},
+            {"dayNumber": 2, "label": "Pull", "exercises": [
+                "ex_deadlift", "ex_barbell_row", "ex_lat_pulldown", "ex_face_pull", "ex_bicep_curl", "ex_hammer_curl"
+            ]},
+            {"dayNumber": 3, "label": "Legs", "exercises": [
+                "ex_squat", "ex_leg_press", "ex_romanian_dl", "ex_leg_curl", "ex_leg_ext", "ex_calf_raise"
+            ]},
+        ],
+    },
+    4: {
+        "name": "Upper/Lower x2",
+        "days": [
+            {"dayNumber": 1, "label": "Upper A (Strength)", "exercises": [
+                "ex_bench", "ex_barbell_row", "ex_ohp", "ex_pullup", "ex_bicep_curl", "ex_tricep_pushdown"
+            ]},
+            {"dayNumber": 2, "label": "Lower A (Strength)", "exercises": [
+                "ex_squat", "ex_romanian_dl", "ex_leg_press", "ex_leg_curl", "ex_calf_raise", "ex_plank"
+            ]},
+            {"dayNumber": 3, "label": "Upper B (Hypertrophy)", "exercises": [
+                "ex_incline_bench", "ex_seated_row", "ex_lateral_raise", "ex_face_pull", "ex_hammer_curl", "ex_skull_crusher"
+            ]},
+            {"dayNumber": 4, "label": "Lower B (Hypertrophy)", "exercises": [
+                "ex_leg_press", "ex_squat", "ex_leg_ext", "ex_leg_curl", "ex_hip_thrust", "ex_cable_crunch"
+            ]},
+        ],
+    },
+    5: {
+        "name": "PPL + Upper/Lower",
+        "days": [
+            {"dayNumber": 1, "label": "Push", "exercises": [
+                "ex_bench", "ex_incline_bench", "ex_ohp", "ex_lateral_raise", "ex_tricep_pushdown", "ex_skull_crusher"
+            ]},
+            {"dayNumber": 2, "label": "Pull", "exercises": [
+                "ex_deadlift", "ex_barbell_row", "ex_lat_pulldown", "ex_face_pull", "ex_bicep_curl", "ex_hammer_curl"
+            ]},
+            {"dayNumber": 3, "label": "Legs", "exercises": [
+                "ex_squat", "ex_leg_press", "ex_romanian_dl", "ex_leg_curl", "ex_leg_ext", "ex_calf_raise"
+            ]},
+            {"dayNumber": 4, "label": "Upper", "exercises": [
+                "ex_incline_bench", "ex_seated_row", "ex_ohp", "ex_pullup", "ex_hammer_curl", "ex_tricep_dip"
+            ]},
+            {"dayNumber": 5, "label": "Lower", "exercises": [
+                "ex_squat", "ex_hip_thrust", "ex_leg_press", "ex_leg_curl", "ex_calf_raise", "ex_cable_crunch"
+            ]},
+        ],
+    },
+    6: {
+        "name": "PPL x2",
+        "days": [
+            {"dayNumber": 1, "label": "Push A", "exercises": [
+                "ex_bench", "ex_incline_bench", "ex_ohp", "ex_lateral_raise", "ex_tricep_pushdown", "ex_skull_crusher"
+            ]},
+            {"dayNumber": 2, "label": "Pull A", "exercises": [
+                "ex_deadlift", "ex_barbell_row", "ex_lat_pulldown", "ex_face_pull", "ex_bicep_curl", "ex_hammer_curl"
+            ]},
+            {"dayNumber": 3, "label": "Legs A", "exercises": [
+                "ex_squat", "ex_leg_press", "ex_romanian_dl", "ex_leg_curl", "ex_leg_ext", "ex_calf_raise"
+            ]},
+            {"dayNumber": 4, "label": "Push B", "exercises": [
+                "ex_incline_bench", "ex_dumbbell_fly", "ex_ohp", "ex_rear_delt_fly", "ex_tricep_dip", "ex_cable_crossover"
+            ]},
+            {"dayNumber": 5, "label": "Pull B", "exercises": [
+                "ex_barbell_row", "ex_pullup", "ex_seated_row", "ex_face_pull", "ex_preacher_curl", "ex_hammer_curl"
+            ]},
+            {"dayNumber": 6, "label": "Legs B", "exercises": [
+                "ex_leg_press", "ex_squat", "ex_hip_thrust", "ex_leg_curl", "ex_calf_raise", "ex_cable_crunch"
+            ]},
+        ],
+    },
+    7: {
+        "name": "Bro Split",
+        "days": [
+            {"dayNumber": 1, "label": "Chest", "exercises": [
+                "ex_bench", "ex_incline_bench", "ex_dumbbell_fly", "ex_cable_crossover"
+            ]},
+            {"dayNumber": 2, "label": "Back", "exercises": [
+                "ex_deadlift", "ex_barbell_row", "ex_lat_pulldown", "ex_seated_row", "ex_pullup"
+            ]},
+            {"dayNumber": 3, "label": "Shoulders", "exercises": [
+                "ex_ohp", "ex_lateral_raise", "ex_face_pull", "ex_rear_delt_fly"
+            ]},
+            {"dayNumber": 4, "label": "Legs", "exercises": [
+                "ex_squat", "ex_leg_press", "ex_romanian_dl", "ex_leg_curl", "ex_leg_ext", "ex_calf_raise"
+            ]},
+            {"dayNumber": 5, "label": "Arms", "exercises": [
+                "ex_bicep_curl", "ex_hammer_curl", "ex_preacher_curl", "ex_tricep_pushdown", "ex_skull_crusher", "ex_tricep_dip"
+            ]},
+            {"dayNumber": 6, "label": "Glutes & Core", "exercises": [
+                "ex_hip_thrust", "ex_cable_crunch", "ex_plank"
+            ]},
+            {"dayNumber": 7, "label": "Active Recovery / Cardio", "exercises": [
+                "ex_treadmill", "ex_cycling"
+            ]},
+        ],
+    },
+}
+
+@app.post("/api/v1/programs/generate", status_code=201)
+async def generate_program(payload: ProgramGenerateRequest, user_id: str = Depends(get_user_id)):
+    days_per_week = payload.daysPerWeek
+    template = PROGRAM_TEMPLATES.get(days_per_week)
+    if not template:
+        raise HTTPException(400, f"No template for {days_per_week} days/week")
+
+    # Create the split from the template
+    split_id = _gen_id("split_")
+    days = []
+    for d in template["days"]:
+        day_id = _gen_id("day_")
+        day_exercises = []
+        for idx, ex_id in enumerate(d["exercises"]):
+            day_exercises.append({
+                "id": _gen_id("sde_"),
+                "splitDayId": day_id,
+                "exerciseId": ex_id,
+                "orderIndex": idx,
+            })
+        days.append({
+            "id": day_id,
+            "splitId": split_id,
+            "dayNumber": d["dayNumber"],
+            "label": d["label"],
+            "exercises": day_exercises,
+        })
+
+    split = {
+        "id": split_id,
+        "userId": user_id,
+        "name": template["name"],
+        "isActive": False,
+        "createdAt": datetime.now().isoformat(),
+        "days": days,
+    }
+    _splits[split_id] = split
+    return split
 
 # ============================================================================
 # WORKOUTS
@@ -479,7 +683,6 @@ async def list_workouts(
     total = len(user_workouts)
     start = (page - 1) * limit
     items = user_workouts[start : start + limit]
-    # Attach sets to each workout
     for w in items:
         w["sets"] = [s for s in _workout_sets.values() if s["workoutId"] == w["id"]]
     return {"items": items, "page": page, "limit": limit, "total": total}
@@ -541,7 +744,6 @@ async def create_workout_set(workout_id: str, payload: WorkoutSetCreate, user_id
         "reps": payload.reps,
         "weightKg": payload.weightKg,
         "rpe": payload.rpe,
-        "isWarmup": payload.isWarmup,
     }
     _workout_sets[set_id] = new_set
     return new_set
@@ -575,7 +777,6 @@ async def get_recommendations(user_id: str = Depends(get_user_id)):
     user_workouts = [w for w in _workouts.values() if w["userId"] == user_id and not w.get("deletedAt")]
     if not user_workouts:
         return []
-    # Find exercises user has done and suggest progressive overload
     exercise_sets: dict = defaultdict(list)
     for s in _workout_sets.values():
         if any(w["id"] == s["workoutId"] for w in user_workouts):
@@ -591,6 +792,79 @@ async def get_recommendations(user_id: str = Depends(get_user_id)):
                 "recommendation": f"Last best: {best['weightKg']}kg x {best['reps']}. Try {best['weightKg'] + 2.5}kg x {best['reps']} or {best['weightKg']}kg x {best['reps'] + 1}",
             })
     return recs
+
+# ============================================================================
+# ESTIMATED 1RM FOR ALL EXERCISES
+# ============================================================================
+
+@app.get("/api/v1/progress/all-1rm")
+async def get_all_estimated_1rm(user_id: str = Depends(get_user_id)):
+    """Get estimated 1RM for every exercise the user has ever done."""
+    user_workouts = {w["id"]: w for w in _workouts.values() if w["userId"] == user_id and not w.get("deletedAt")}
+    if not user_workouts:
+        return []
+
+    # Group sets by exercise
+    exercise_sets: dict = defaultdict(list)
+    for s in _workout_sets.values():
+        if s["workoutId"] in user_workouts:
+            w = user_workouts[s["workoutId"]]
+            exercise_sets[s["exerciseId"]].append({**s, "date": w["date"]})
+
+    results = []
+    for ex_id, sets in exercise_sets.items():
+        ex = next((e for e in DEFAULT_EXERCISES if e["id"] == ex_id), None)
+        if not ex:
+            continue
+
+        # Calculate e1RM for each set using Epley formula
+        set_e1rms = []
+        for s in sets:
+            if s["reps"] == 1:
+                e1rm = s["weightKg"]
+            else:
+                e1rm = round(s["weightKg"] * (1 + s["reps"] / 30), 1)
+            set_e1rms.append({"e1rm": e1rm, "date": s["date"], "weightKg": s["weightKg"], "reps": s["reps"]})
+
+        # Sort by date to get progression
+        set_e1rms.sort(key=lambda x: x["date"])
+
+        best = max(set_e1rms, key=lambda x: x["e1rm"])
+        latest = set_e1rms[-1]
+
+        # Get recent trend (last 3 sessions)
+        recent_dates = sorted(set(s["date"] for s in set_e1rms), reverse=True)[:3]
+        recent_best_per_session = []
+        for d in recent_dates:
+            session_sets = [s for s in set_e1rms if s["date"] == d]
+            recent_best_per_session.append(max(session_sets, key=lambda x: x["e1rm"]))
+
+        trend = "stable"
+        if len(recent_best_per_session) >= 2:
+            if recent_best_per_session[0]["e1rm"] > recent_best_per_session[-1]["e1rm"]:
+                trend = "up"
+            elif recent_best_per_session[0]["e1rm"] < recent_best_per_session[-1]["e1rm"]:
+                trend = "down"
+
+        results.append({
+            "exerciseId": ex_id,
+            "exerciseName": ex["name"],
+            "muscleGroup": ex["muscleGroup"],
+            "estimated1RM": best["e1rm"],
+            "bestWeight": best["weightKg"],
+            "bestReps": best["reps"],
+            "latestE1RM": latest["e1rm"],
+            "latestWeight": latest["weightKg"],
+            "latestReps": latest["reps"],
+            "latestDate": latest["date"],
+            "totalSets": len(sets),
+            "trend": trend,
+            "history": set_e1rms[-10:],  # last 10 data points
+        })
+
+    # Sort by muscle group then exercise name
+    results.sort(key=lambda x: (x["muscleGroup"], x["exerciseName"]))
+    return results
 
 # ============================================================================
 # NUTRITION
@@ -619,7 +893,6 @@ async def get_nutrition_logs(
 async def create_nutrition_log(payload: NutritionCreate, user_id: str = Depends(get_user_id)):
     log_id = _gen_id("nut_")
     log_date = payload.date or datetime.now().strftime("%Y-%m-%d")
-    # If date looks like ISO datetime, extract just the date part
     if "T" in log_date:
         log_date = log_date[:10]
 
@@ -640,6 +913,34 @@ async def create_nutrition_log(payload: NutritionCreate, user_id: str = Depends(
     }
     _nutrition_logs[log_id] = entry
     return entry
+
+@app.post("/api/v1/nutrition/batch", status_code=201)
+async def batch_create_nutrition(payload: NutritionBatchCreate, user_id: str = Depends(get_user_id)):
+    """Log multiple food items at once."""
+    created = []
+    for item in payload.items:
+        log_id = _gen_id("nut_")
+        log_date = item.date or datetime.now().strftime("%Y-%m-%d")
+        if "T" in log_date:
+            log_date = log_date[:10]
+        entry = {
+            "id": log_id,
+            "userId": user_id,
+            "date": log_date,
+            "mealType": item.mealType,
+            "foodName": item.foodName,
+            "calories": item.calories,
+            "proteinG": item.proteinG,
+            "carbsG": item.carbsG,
+            "fatG": item.fatG,
+            "quantityG": item.quantityG,
+            "servingUnit": item.servingUnit,
+            "openFoodFactsId": item.openFoodFactsId,
+            "createdAt": datetime.now().isoformat(),
+        }
+        _nutrition_logs[log_id] = entry
+        created.append(entry)
+    return created
 
 @app.put("/api/v1/nutrition/{nutrition_id}")
 async def update_nutrition_log(nutrition_id: str, request: Request, user_id: str = Depends(get_user_id)):
@@ -666,7 +967,6 @@ async def get_nutrition_summary(
     offset: int = Query(0, ge=0),
     user_id: str = Depends(get_user_id),
 ):
-    """Get nutrition summary for a period (week/month/year)"""
     now = datetime.now()
     user_logs = [l for l in _nutrition_logs.values() if l["userId"] == user_id]
 
@@ -674,10 +974,9 @@ async def get_nutrition_summary(
         start = now - timedelta(weeks=1 + offset)
         end = now - timedelta(weeks=offset)
     elif period == "month":
-        # Approximate months
         start = now - timedelta(days=30 * (1 + offset))
         end = now - timedelta(days=30 * offset)
-    else:  # year
+    else:
         start = now - timedelta(days=365 * (1 + offset))
         end = now - timedelta(days=365 * offset)
 
@@ -686,7 +985,6 @@ async def get_nutrition_summary(
 
     period_logs = [l for l in user_logs if start_str <= l["date"] <= end_str]
 
-    # Group by date
     daily: dict = defaultdict(lambda: {"calories": 0, "proteinG": 0, "carbsG": 0, "fatG": 0})
     for l in period_logs:
         d = daily[l["date"]]
@@ -775,7 +1073,6 @@ async def get_volume_progress(
             w = user_workouts[s["workoutId"]]
             relevant_sets.append({**s, "date": w["date"]})
 
-    # Group by week
     weekly_volume: dict = defaultdict(float)
     for s in relevant_sets:
         try:
@@ -846,7 +1143,7 @@ async def get_bodyweight_progress(user_id: str = Depends(get_user_id)):
     return []
 
 # ============================================================================
-# HISTORY (workouts + nutrition combined)
+# HISTORY
 # ============================================================================
 
 @app.get("/api/v1/history")
@@ -855,7 +1152,6 @@ async def get_history(
     offset: int = Query(0, ge=0),
     user_id: str = Depends(get_user_id),
 ):
-    """Combined history of workouts and nutrition for a given period"""
     now = datetime.now()
 
     if period == "week":
@@ -874,7 +1170,6 @@ async def get_history(
     start_str = start.strftime("%Y-%m-%d")
     end_str = end.strftime("%Y-%m-%d")
 
-    # Workouts in period
     user_workouts = [
         w for w in _workouts.values()
         if w["userId"] == user_id and not w.get("deletedAt")
@@ -884,13 +1179,11 @@ async def get_history(
         w["sets"] = [s for s in _workout_sets.values() if s["workoutId"] == w["id"]]
     user_workouts.sort(key=lambda w: w["date"], reverse=True)
 
-    # Nutrition in period
     user_logs = [
         l for l in _nutrition_logs.values()
         if l["userId"] == user_id and start_str <= l["date"] <= end_str
     ]
 
-    # Daily nutrition totals
     daily_nutrition: dict = defaultdict(lambda: {"calories": 0, "proteinG": 0, "carbsG": 0, "fatG": 0})
     for l in user_logs:
         d = daily_nutrition[l["date"]]
